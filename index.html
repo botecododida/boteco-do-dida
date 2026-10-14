@@ -167,6 +167,12 @@ nav.tabs .badge {
 }
 .presence button.on-ok { background: var(--ok); color: #fff; border-color: transparent; }
 .presence button.on-bad { background: var(--bad); color: #fff; border-color: transparent; }
+.presence button.later { opacity: .45; }
+.presence button.paid-lock {
+  min-width: 142px; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  background: var(--ok-bg); color: var(--ok); border-color: transparent;
+}
+.presence button.paid-lock svg { width: 16px; height: 16px; }
 
 /* ===== lista de pagamentos ===== */
 .pay-row {
@@ -317,6 +323,12 @@ button.chip:hover { background: var(--surface-2); }
 .empty { text-align: center; padding: 32px 16px; color: var(--muted); }
 .empty b { display: block; font-family: var(--font-display); color: var(--ink); font-size: 1.15rem; margin-bottom: 6px; }
 
+/* ===== manual ===== */
+.help section + section { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.help h3 { font-size: 1.05rem; margin-bottom: 6px; }
+.help ul { padding-left: 18px; display: flex; flex-direction: column; gap: 7px; }
+.help li { font-size: .93rem; }
+
 /* ===== backup ===== */
 .section-title { font-family: var(--font-display); font-weight: 700; font-size: .82rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 18px 0 8px; }
 .section-title:first-child { margin-top: 0; }
@@ -454,8 +466,10 @@ function fmtDayLong(s){
 }
 function money(n){ return brl.format(+n||0); }
 function parseMoney(v){
-  var s=String(v||"").trim().replace(/[^\d,.-]/g,"");
+  var s=String(v||"").trim().replace(/[^\d,.]/g,"");
   if(s.indexOf(",")>-1) s=s.replace(/\./g,"").replace(",",".");
+  /* sem vírgula, "1.500" é mil e quinhentos (ponto de milhar), não 1,50 */
+  else if(/^\d{1,3}(\.\d{3})+$/.test(s)) s=s.replace(/\./g,"");
   var n=parseFloat(s); return isFinite(n)?Math.round(n*100)/100:0;
 }
 function moneyInput(n){ return n?String(n.toFixed(2)).replace(".",","):""; }
@@ -536,6 +550,7 @@ var ICONS = {
   down:'<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
   up:'<path d="M12 20V9M7 14l5-5 5 5M5 4h14"/>',
   chevdown:'<path d="M6 9l6 6 6-6"/>',
+  help:'<circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 1 1 3.4 2.3c-.6.3-1 .8-1 1.5v.4"/><path d="M12 16.7v.2"/>',
   ig:'<rect x="3.5" y="3.5" width="17" height="17" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.2" cy="6.8" r="1.1" fill="currentColor" stroke="none"/>'
 };
 function icon(n){
@@ -655,11 +670,73 @@ function renderNav(){
   });
 }
 
+/* ================== manual ================== */
+/* título de cada aba + "?" que abre o manual começando pela tela em que ela está */
+function header(title,extra){
+  return h("div",{class:"hdr"},
+    h("h1",{text:title}),
+    h("div",{style:"display:flex;align-items:center;gap:8px;"},
+      extra||null,
+      h("button",{class:"icon-btn",type:"button","aria-label":"Como usar",onclick:function(){ openHelp(ui.tab); }},icon("help"))
+    ));
+}
+/* curto e na linguagem do dia a dia; **texto** vira negrito (nome dos botões).
+   Se mudar como o app funciona, mude aqui também. */
+function helpSections(){
+  return [
+    ["escala","Escala",[
+      "Toque em **Escalar** e marque quem vai trabalhar no dia. Para outro dia, toque na data lá em cima e escolha no calendário.",
+      "Depois do turno, marque **Veio** ou **Faltou** em cada pessoa. Só quem tem **Veio** entra no pagamento. Dia que ainda não chegou não dá para marcar.",
+      "Marcou errado? É só tocar no outro botão. Se o dia já foi pago (aparece **Pago**), desfaça o pagamento em **A pagar** antes.",
+      "Escalou a pessoa errada? Toque em **Editar escala** e desmarque. Quem já tem Veio ou Faltou não pode ser tirado."
+    ]],
+    ["pagar","A pagar",[
+      "Mostra quanto cada pessoa tem a receber na quinzena: do dia 1 ao 15 e do dia 16 ao fim do mês. As setas trocam de quinzena.",
+      "Se aparecer **Sem marcar presença**, marque Veio ou Faltou ali mesmo. Quem fica sem marcar não entra na conta.",
+      "**Copiar Pix** copia a chave da pessoa para você colar no app do banco.",
+      "Depois de pagar no banco, toque em **Paguei**, confira os dias e toque em **Confirmar**. Pagou só uma parte? Desmarque os dias que ficaram faltando.",
+      "Registrou um pagamento por engano? Em **Já pagos**, toque em **Desfazer** e confirme."
+    ]],
+    ["resumo","Resumo",[
+      "Manda para cada pessoa, pelo WhatsApp, os dias que ela trabalhou e o total.",
+      "Toque no botão verde, mande a mensagem no WhatsApp e volte para o app: o botão já mostra a próxima pessoa.",
+      "O botão só aparece para quem tem WhatsApp cadastrado com DDD."
+    ]],
+    ["pessoas","Pessoas",[
+      "Toque em **Nova pessoa** e preencha nome, WhatsApp com DDD, valor da diária e chave Pix.",
+      "Para mudar a diária, toque em **Editar** na pessoa. O app pergunta se o valor novo vale também para os dias que ainda não foram pagos.",
+      "Alguém parou de trabalhar? Toque em **Desativar**. A pessoa sai da lista de escalar, mas o histórico e o que ela tem a receber continuam."
+    ]],
+    ["backup","Backup",[
+      "Os dados ficam só neste celular. Se ele quebrar, for roubado ou trocado, só o backup salva.",
+      canShareFiles
+        ? "Quando aparecer o aviso de backup, toque em **Salvar no WhatsApp** e mande o arquivo para o seu próprio número."
+        : "Quando aparecer o aviso de backup, toque em **Baixar backup** e guarde o arquivo fora deste aparelho.",
+      "Celular novo? Abra o app, vá em **Pessoas**, toque em **Restaurar backup** e escolha o arquivo do backup."
+    ]]
+  ];
+}
+function rich(t){
+  return t.split("**").map(function(part,i){ return i%2?h("b",{text:part}):part; });
+}
+function openHelp(tab){
+  var secs=helpSections();
+  secs.sort(function(a,b){ return (b[0]===tab)-(a[0]===tab); }); /* a tela atual primeiro */
+  var body=h("div",{class:"help"});
+  secs.forEach(function(s){
+    body.appendChild(h("section",null,
+      h("h3",{text:s[1]}),
+      h("ul",null,s[2].map(function(t){ return h("li",null,rich(t)); }))
+    ));
+  });
+  openSheet("Como usar",body);
+}
+
 /* ================== ESCALA ================== */
 function renderEscala(){
   var main=$("#main"); main.textContent="";
 
-  addChild(main,h("div",{class:"hdr"},h("h1",{text:"Escala"})));
+  addChild(main,header("Escala"));
   addChild(main,backupNotice());
 
   /* date picker button */
@@ -793,16 +870,25 @@ function renderDayPanel(main){
 
 function renderPresence(entry,onMark){
   var div=h("div",{class:"presence"});
-  var isPast=entry.date<=today();
 
-  var bVeio=h("button",{type:"button",text:"Veio",onclick:function(){
+  /* dia já pago: trava. Trocar para "Faltou" tiraria o dia do "Já pago" sem deixar rastro;
+     para mudar, ela desfaz o pagamento em "A pagar" antes */
+  if(entry.paid){
+    div.appendChild(h("button",{type:"button",class:"paid-lock",onclick:function(){
+      toast("Esse dia já foi pago. Para mudar, desfaça o pagamento em \"A pagar\".");
+    }},icon("check"),h("span",{text:"Pago"})));
+    return div;
+  }
+
+  /* dia que ainda não chegou: não marca (evita pagar adiantado por engano) */
+  function mark(status){
+    if(entry.date>today()){ toast("Esse dia ainda não chegou. Marque depois do turno."); return; }
     if(onMark) onMark();
-    entry.status="trabalhou"; commit();
-  }});
-  var bFaltou=h("button",{type:"button",text:"Faltou",onclick:function(){
-    if(onMark) onMark();
-    entry.status="falta"; commit();
-  }});
+    entry.status=status; commit();
+  }
+  var bVeio=h("button",{type:"button",text:"Veio",onclick:function(){ mark("trabalhou"); }});
+  var bFaltou=h("button",{type:"button",text:"Faltou",onclick:function(){ mark("falta"); }});
+  if(entry.date>today()){ bVeio.classList.add("later"); bFaltou.classList.add("later"); }
   if(entry.status==="trabalhou") bVeio.classList.add("on-ok");
   if(entry.status==="falta") bFaltou.classList.add("on-bad");
   div.appendChild(bVeio);
@@ -902,7 +988,7 @@ function sumVal(list){ return list.reduce(function(s,e){return s+(+e.value||0);}
 
 function renderPagar(){
   var main=$("#main"); main.textContent="";
-  addChild(main,h("div",{class:"hdr"},h("h1",{text:"A pagar"})));
+  addChild(main,header("A pagar"));
 
   var t=today();
   var worked=db.entries.filter(function(e){return e.status==="trabalhou";});
@@ -1155,7 +1241,7 @@ function setSumMode(m){
 
 function renderResumo(){
   var main=$("#main"); main.textContent="";
-  addChild(main,h("div",{class:"hdr"},h("h1",{text:"Resumo"})));
+  addChild(main,header("Resumo"));
 
   /* escolha do período: quinzena (padrão) ou semana */
   var modes=h("div",{class:"chips seg"});
@@ -1289,8 +1375,7 @@ function buildSummaryMsg(p,info,r){
 /* ================== PESSOAS ================== */
 function renderPessoas(){
   var main=$("#main"); main.textContent="";
-  addChild(main,h("div",{class:"hdr"},
-    h("h1",{text:"Pessoas"}),
+  addChild(main,header("Pessoas",
     h("button",{class:"btn primary",type:"button",onclick:openPersonForm.bind(null,null)},icon("plus"),h("span",{text:"Nova pessoa"}))
   ));
 
@@ -1404,7 +1489,9 @@ function openPersonForm(existing){
   var iPhone=h("input",{type:"tel",placeholder:"(99) 99999-9999",value:existing?existing.phone||"":""});
   body.appendChild(h("div",{class:"field"},h("label",{text:"WhatsApp"}),iPhone));
 
-  var iRate=h("input",{type:"text",inputmode:"decimal",placeholder:"Ex: 150,00",value:existing?moneyInput(existing.rate):""});
+  /* ao sair do campo, mostra o valor do jeito que o app entendeu (ex.: "1.500" vira "1500,00") */
+  var iRate=h("input",{type:"text",inputmode:"decimal",placeholder:"Ex: 150,00",value:existing?moneyInput(existing.rate):"",
+    onblur:function(){ var n=parseMoney(iRate.value); if(n) iRate.value=moneyInput(n); }});
   body.appendChild(h("div",{class:"field"},h("label",{text:"Valor por dia (R$)"}),iRate));
 
   var iPix=h("input",{type:"text",placeholder:"CPF, e-mail ou chave",value:existing?existing.pix||"":""});
@@ -1426,6 +1513,7 @@ function openPersonForm(existing){
     var name=iName.value.trim();
     if(!name){ toast("Preencha o nome."); return; }
     var rate=parseMoney(iRate.value);
+    if(!(rate>0)){ toast("Preencha o valor da diária."); return; }
     if(isNew){
       db.people.push({
         id:uid(), name:name, phone:iPhone.value.trim(), rate:rate,
@@ -1435,12 +1523,25 @@ function openPersonForm(existing){
       closeSheet(); commit(firstName(name)+" cadastrado!");
     } else {
       var p=person(existing.id)||existing; /* os dados podem ter sido recarregados com a janela aberta */
+      /* diária nova: cada dia guarda o valor de quando foi escalado. Pergunta se o novo vale
+         também para os dias ainda não pagos (os pagos ficam como foram pagos). */
+      var applied=0;
+      if(rate!==p.rate){
+        var open=db.entries.filter(function(e){return e.personId===p.id&&!e.paid&&e.status!=="falta"&&e.value!==rate;});
+        if(open.length&&confirm("Usar "+money(rate)+" também "+
+            (open.length===1?"no dia que ainda não foi pago":"nos "+open.length+" dias que ainda não foram pagos")+
+            "?\n\nOK: sim.\nCancelar: só nos próximos dias que você escalar.")){
+          db.entries.forEach(function(e){ if(e.personId===p.id&&!e.paid&&e.value!==rate) e.value=rate; });
+          applied=open.length;
+        }
+      }
       p.name=name;
       p.phone=iPhone.value.trim();
       p.rate=rate;
       p.pix=iPix.value.trim();
       p.role=iRole.value;
-      closeSheet(); commit("Dados atualizados.");
+      closeSheet();
+      commit(applied?"Diária atualizada também em "+applied+" dia"+(applied>1?"s":"")+".":"Dados atualizados.");
     }
   }}));
 
