@@ -320,7 +320,7 @@ button.chip:hover { background: var(--surface-2); }
 /* ===== backup ===== */
 .section-title { font-family: var(--font-display); font-weight: 700; font-size: .82rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 18px 0 8px; }
 .section-title:first-child { margin-top: 0; }
-.backup-when { color: var(--muted); font-size: .8rem; text-align: center; }
+.note { color: var(--muted); font-size: .8rem; text-align: center; }
 
 /* ===== pill ===== */
 .pill { display: inline-flex; align-items: center; gap: 4px; border-radius: 99px; padding: 2px 8px; font-size: .72rem; font-weight: 700; }
@@ -387,9 +387,14 @@ var brl = new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"});
 function emptyDb(){
   return { people:[], entries:[], functions:[], settings:{lastBackup:null} };
 }
+/* texto que esta janela leu ou gravou por último: se o salvo mudar sem ser por ela,
+   foi outra janela do app (aba do navegador + app instalado usam os mesmos dados) */
+var savedJson = null;
 function loadDb(){
   try {
-    var r = JSON.parse(localStorage.getItem(KEY)||"null");
+    var raw = localStorage.getItem(KEY);
+    savedJson = raw;
+    var r = JSON.parse(raw||"null");
     if(r && Array.isArray(r.people) && Array.isArray(r.entries)){
       if(!Array.isArray(r.functions)) r.functions = [];
       r.settings = Object.assign(emptyDb().settings, r.settings||{});
@@ -404,8 +409,23 @@ if(navigator.storage&&navigator.storage.persisted&&navigator.storage.persist){
   navigator.storage.persisted().then(function(ok){ if(!ok) return navigator.storage.persist(); }).catch(function(){});
 }
 function persist(){
-  try { localStorage.setItem(KEY,JSON.stringify(db)); return true; }
+  try {
+    if(localStorage.getItem(KEY)!==savedJson){
+      /* outra janela salvou e esta não ficou sabendo: não grava por cima */
+      toast("O app estava aberto em outra janela. Confira e faça de novo.");
+      return false;
+    }
+    var s=JSON.stringify(db);
+    localStorage.setItem(KEY,s); savedJson=s; return true;
+  }
   catch(e){ toast("Sem espaço para salvar. Libere espaço no aparelho."); return false; }
+}
+/* traz o que outra janela salvou; diz se mudou */
+function syncDb(){
+  var raw;
+  try { raw=localStorage.getItem(KEY); } catch(e){ return false; }
+  if(raw===savedJson) return false;
+  db=loadDb(); return true;
 }
 
 /* ================== utilitários ================== */
@@ -586,7 +606,11 @@ var ui = {
 try { var st=localStorage.getItem(KEY+".tab"); if(st) ui.tab=st; } catch(e){}
 try { var sm=localStorage.getItem(KEY+".sumMode"); if(sm==="semana"||sm==="quinzena") ui.sumMode=sm; } catch(e){}
 
-function commit(msg){ persist(); render(); if(msg) toast(msg); }
+function commit(msg){
+  /* não salvou: volta para o que está gravado, para a tela não mostrar algo que não ficou salvo */
+  if(!persist()){ db=loadDb(); render(); return; }
+  render(); if(msg) toast(msg);
+}
 
 /* ================== abas ================== */
 var TABS=[
@@ -1246,7 +1270,7 @@ function renderPessoas(){
   dataDiv.appendChild(h("button",{class:"btn block",type:"button",onclick:exportBackup},
     icon(canShareFiles?"wa":"down"),h("span",{text:canShareFiles?"Salvar backup no WhatsApp":"Baixar backup"})));
   var bd=backupDays();
-  dataDiv.appendChild(h("p",{class:"backup-when",text:bd===null?"Nenhum backup feito ainda.":
+  dataDiv.appendChild(h("p",{class:"note",text:bd===null?"Nenhum backup feito ainda.":
     "Último backup: "+(bd<=0?"hoje.":bd===1?"ontem.":"há "+bd+" dias.")}));
 
   /* aceita .txt (backup mandado pelo WhatsApp) e .json (backups antigos) */
@@ -1340,21 +1364,28 @@ function openPersonForm(existing){
       });
       closeSheet(); commit(firstName(name)+" cadastrado!");
     } else {
-      existing.name=name;
-      existing.phone=iPhone.value.trim();
-      existing.rate=rate;
-      existing.pix=iPix.value.trim();
-      existing.role=iRole.value;
+      var p=person(existing.id)||existing; /* os dados podem ter sido recarregados com a janela aberta */
+      p.name=name;
+      p.phone=iPhone.value.trim();
+      p.rate=rate;
+      p.pix=iPix.value.trim();
+      p.role=iRole.value;
       closeSheet(); commit("Dados atualizados.");
     }
   }}));
 
+  /* excluir apagaria junto os dias da pessoa (inclusive o que ela tem a receber):
+     só aparece para quem nunca foi escalado, ex.: cadastro feito por engano */
   if(!isNew){
-    body.appendChild(confirmBtn("Excluir pessoa","Confirmar exclusão?","danger block",function(){
-      db.people=db.people.filter(function(p){return p.id!==existing.id;});
-      db.entries=db.entries.filter(function(e){return e.personId!==existing.id;});
-      closeSheet(); commit(firstName(existing.name)+" removido.");
-    }));
+    if(db.entries.some(function(e){return e.personId===existing.id;})){
+      body.appendChild(h("p",{class:"note",text:"Quem já foi escalado não pode ser excluído."+
+        (existing.active===false?"":" Para tirar da escala, use \"Desativar\" na lista.")}));
+    } else {
+      body.appendChild(confirmBtn("Excluir pessoa","Confirmar exclusão?","danger block",function(){
+        db.people=db.people.filter(function(p){return p.id!==existing.id;});
+        closeSheet(); commit(firstName(existing.name)+" removido.");
+      }));
+    }
   }
 
   openSheet(isNew?"Nova pessoa":"Editar "+firstName(existing.name),body);
@@ -1426,12 +1457,17 @@ function render(){
 
 render();
 
-/* ao voltar do WhatsApp, atualiza a fila de envio do resumo */
+/* outra janela do app salvou: mostra os dados novos aqui também */
+window.addEventListener("storage",function(e){
+  if(e.key===KEY&&syncDb()) render();
+});
+
+/* ao voltar para o app: pega o que outra janela salvou e
+   atualiza a fila de envio do resumo (sem mexer numa janela aberta) */
 document.addEventListener("visibilitychange",function(){
   if(document.visibilityState!=="visible") return;
-  if(ui.tab!=="resumo") return;
-  if(document.querySelector(".scrim")) return; /* não mexe com uma janela aberta */
-  render();
+  var changed=syncDb();
+  if(changed||(ui.tab==="resumo"&&!document.querySelector(".scrim"))) render();
 });
 
 /* ================== service worker ================== */
