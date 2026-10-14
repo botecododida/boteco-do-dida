@@ -1,16 +1,15 @@
-var CACHE = "boteco-dida-v2";
-var ASSETS = [
-  "./",
-  "./index.html",
-  "./manifest.json",
-  "https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Figtree:wght@400;500;600;700&display=swap"
-];
+/* Boteco do Dida - service worker
+   App (mesma origem): busca na rede primeiro, cai no cache se estiver offline.
+   Assim toda atualização publicada no GitHub chega na próxima vez que ela abrir com internet.
+   Fontes do Google: cache primeiro (não mudam). */
+var CACHE = "boteco-dida-v4";
+var ASSETS = ["./", "./index.html", "./manifest.json",
+  "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png",
+  "./icon-maskable-192.png", "./icon-maskable-512.png"];
 
 self.addEventListener("install", function(e) {
   e.waitUntil(
-    caches.open(CACHE).then(function(cache) {
-      return cache.addAll(ASSETS);
-    })
+    caches.open(CACHE).then(function(cache) { return cache.addAll(ASSETS); })
   );
   self.skipWaiting();
 });
@@ -22,36 +21,50 @@ self.addEventListener("activate", function(e) {
         names.filter(function(n) { return n !== CACHE; })
              .map(function(n) { return caches.delete(n); })
       );
-    })
+    }).then(function() { return self.clients.claim(); })
   );
-  self.clients.claim();
 });
 
-self.addEventListener("fetch", function(e) {
-  // Cache-first for same-origin and font assets
-  if (e.request.method !== "GET") return;
+function isFont(url) {
+  return url.indexOf("fonts.googleapis.com") > -1 || url.indexOf("fonts.gstatic.com") > -1;
+}
 
+self.addEventListener("fetch", function(e) {
+  var req = e.request;
+  if (req.method !== "GET") return;
+  var url = req.url;
+
+  // Fontes: cache primeiro
+  if (isFont(url)) {
+    e.respondWith(
+      caches.match(req).then(function(cached) {
+        return cached || fetch(req).then(function(res) {
+          if (res.ok || res.type === "opaque") {
+            var copy = res.clone();
+            caches.open(CACHE).then(function(c) { c.put(req, copy); });
+          }
+          return res;
+        });
+      })
+    );
+    return;
+  }
+
+  // Só cuida do próprio app
+  if (!url.startsWith(self.location.origin)) return;
+
+  // App: rede primeiro, cache se offline
   e.respondWith(
-    caches.match(e.request).then(function(cached) {
-      if (cached) return cached;
-      return fetch(e.request).then(function(response) {
-        // Cache font files and CSS for offline use
-        if (response.ok && (
-          e.request.url.indexOf("fonts.googleapis.com") > -1 ||
-          e.request.url.indexOf("fonts.gstatic.com") > -1 ||
-          e.request.url.startsWith(self.location.origin)
-        )) {
-          var clone = response.clone();
-          caches.open(CACHE).then(function(cache) {
-            cache.put(e.request, clone);
-          });
-        }
-        return response;
-      }).catch(function() {
-        // Offline fallback for navigation
-        if (e.request.mode === "navigate") {
-          return caches.match("./index.html");
-        }
+    fetch(req, { cache: "no-store" }).then(function(res) {
+      if (res.ok) {
+        var copy = res.clone();
+        caches.open(CACHE).then(function(c) { c.put(req, copy); });
+      }
+      return res;
+    }).catch(function() {
+      return caches.match(req, { ignoreSearch: true }).then(function(cached) {
+        if (cached) return cached;
+        if (req.mode === "navigate") return caches.match("./index.html");
       });
     })
   );
