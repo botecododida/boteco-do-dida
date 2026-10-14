@@ -445,7 +445,10 @@ function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(
 function pad(n){ return (n<10?"0":"")+n; }
 function iso(d){ return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate()); }
 function fromIso(s){ var p=s.split("-"); return new Date(+p[0],+p[1]-1,+p[2]); }
-function today(){ return iso(new Date()); }
+/* "hoje" é o dia do expediente: até as 6h da manhã ainda conta como o dia anterior,
+   porque o turno da noite passa da meia-noite (marcar presença à 1h cai no dia certo) */
+function dayOf(t){ var d=new Date(t); if(d.getHours()<6) d.setDate(d.getDate()-1); return iso(d); }
+function today(){ return dayOf(Date.now()); }
 function addDays(s,n){ var d=fromIso(s); d.setDate(d.getDate()+n); return iso(d); }
 var WD=["dom","seg","ter","qua","qui","sex","sáb"];
 var WDL=["domingo","segunda-feira","terça-feira","quarta-feira","quinta-feira","sexta-feira","sábado"];
@@ -618,8 +621,9 @@ function openSheet(title,body){
 /* ================== estado ================== */
 var ui = {
   tab: "escala",
-  calYear: new Date().getFullYear(),
-  calMonth: new Date().getMonth(),
+  day: today(), /* dia em que a tela foi montada (ver resetToToday) */
+  calYear: fromIso(today()).getFullYear(),
+  calMonth: fromIso(today()).getMonth(),
   selDay: today(),
   sumAnchor: today(),
   sumMode: "quinzena",
@@ -627,6 +631,14 @@ var ui = {
   payAnchor: null, /* null = escolhe sozinho a quinzena ao entrar na aba */
   payMarked: null  /* dias marcados agora em "Sem marcar presença" (seguem na lista até sair da aba) */
 };
+/* o app pode ficar dias aberto na memória do celular: quando vira o dia,
+   volta tudo para o dia novo (senão ela escala no dia de ontem sem perceber) */
+function resetToToday(){
+  var t=today(), d=fromIso(t);
+  ui.day=t; ui.selDay=t; ui.sumAnchor=t;
+  ui.calYear=d.getFullYear(); ui.calMonth=d.getMonth(); ui.calOpen=false;
+  ui.payAnchor=null; ui.payMarked=null;
+}
 try { var st=localStorage.getItem(KEY+".tab"); if(st) ui.tab=st; } catch(e){}
 try { var sm=localStorage.getItem(KEY+".sumMode"); if(sm==="semana"||sm==="quinzena") ui.sumMode=sm; } catch(e){}
 
@@ -687,6 +699,7 @@ function helpSections(){
     ["escala","Escala",[
       "Toque em **Escalar** e marque quem vai trabalhar no dia. Para outro dia, toque na data lá em cima e escolha no calendário.",
       "Depois do turno, marque **Veio** ou **Faltou** em cada pessoa. Só quem tem **Veio** entra no pagamento. Dia que ainda não chegou não dá para marcar.",
+      "Depois da meia-noite, até as 6h, o app continua no dia do turno da noite. Assim dá para marcar a presença no fim do expediente.",
       "Marcou errado? É só tocar no outro botão. Se o dia já foi pago (aparece **Pago**), desfaça o pagamento em **A pagar** antes.",
       "Escalou a pessoa errada? Toque em **Editar escala** e desmarque. Quem já tem Veio ou Faltou não pode ser tirado."
     ]],
@@ -1574,7 +1587,7 @@ var canShareFiles=(function(){
 function backupDays(){
   var t=Date.parse(db.settings.lastBackup||"");
   if(isNaN(t)) return null;
-  return Math.round((fromIso(today())-fromIso(iso(new Date(t))))/864e5);
+  return Math.round((fromIso(today())-fromIso(dayOf(t)))/864e5);
 }
 
 /* aviso na Escala: some por 7 dias depois de cada backup */
@@ -1633,11 +1646,12 @@ window.addEventListener("storage",function(e){
   if(e.key===KEY&&syncDb()) render();
 });
 
-/* ao voltar para o app: pega o que outra janela salvou e
-   atualiza a fila de envio do resumo (sem mexer numa janela aberta) */
+/* ao voltar para o app: pega o que outra janela salvou, volta para o dia novo se o dia virou
+   e atualiza a fila de envio do resumo (sem mexer numa janela aberta) */
 document.addEventListener("visibilitychange",function(){
   if(document.visibilityState!=="visible") return;
   var changed=syncDb();
+  if(today()!==ui.day){ resetToToday(); changed=true; }
   if(changed||(ui.tab==="resumo"&&!document.querySelector(".scrim"))) render();
 });
 
