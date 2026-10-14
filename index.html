@@ -71,8 +71,12 @@ button { cursor: pointer; }
 
 /* ===== shell ===== */
 .shell { display: flex; flex-direction: column; min-height: 100%; min-height: 100dvh; }
-main { flex: 1; overflow-y: auto; padding: 16px 16px calc(80px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; }
+main { flex: 1; overflow-y: auto; padding: calc(16px + env(safe-area-inset-top, 0px)) 16px calc(80px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; }
 main > * { flex: none; }
+/* iPhone com o app instalado: o relógio e a bateria ficam por cima do app, em branco.
+   Esta faixa na cor da marca fica atrás deles (texto legível) e o conteúdo começa abaixo.
+   Nos outros aparelhos a altura é 0. */
+.statusbar-bg { position: fixed; z-index: 40; left: 0; right: 0; top: 0; height: env(safe-area-inset-top, 0px); background: var(--brand); }
 nav.tabs {
   position: fixed; z-index: 30; left: 0; right: 0; bottom: 0;
   background: var(--brand); display: flex;
@@ -364,7 +368,7 @@ button.chip:hover { background: var(--surface-2); }
   .shell { display: grid; grid-template-columns: 220px 1fr; grid-template-rows: 1fr; }
   nav.tabs {
     position: sticky; top: 0; height: 100vh; height: 100dvh;
-    flex-direction: column; gap: 16px; padding: 24px 12px 20px;
+    flex-direction: column; gap: 16px; padding: calc(24px + env(safe-area-inset-top, 0px)) 12px 20px;
   }
   nav.tabs .brand { display: flex; flex-direction: column; gap: 2px; padding: 0 8px; margin-bottom: 6px; }
   nav.tabs .brand b { font-family: var(--font-display); font-size: 1.3rem; font-weight: 800; color: var(--brand-ink); }
@@ -374,12 +378,13 @@ button.chip:hover { background: var(--surface-2); }
     font-size: .92rem; padding: 10px 10px; min-height: 46px;
   }
   nav.tabs .badge { position: static; }
-  main { padding: 28px 28px 40px; }
+  main { padding: calc(28px + env(safe-area-inset-top, 0px)) 28px 40px; }
   .toast { bottom: 28px; }
 }
 </style>
 </head>
 <body>
+<div class="statusbar-bg"></div>
 <div class="shell">
   <nav class="tabs" id="nav">
     <div class="brand" hidden><b>Boteco do Dida</b><small>Freelancers</small></div>
@@ -1373,6 +1378,9 @@ function renderResumo(){
           onclick:function(){ markSent(r,pid); }},
           icon("wa"),h("span",{text:enviado?"Enviar de novo":"Enviar no WhatsApp"}))
       ));
+    } else if(p){
+      /* explica por que esta pessoa não tem o botão de enviar */
+      card.appendChild(h("div",{class:"detail",text:"Sem WhatsApp com DDD no cadastro."}));
     }
 
     main.appendChild(card);
@@ -1450,7 +1458,7 @@ function renderPessoas(){
     icon(canShareFiles?"wa":"down"),h("span",{text:canShareFiles?"Salvar backup no WhatsApp":"Baixar backup"})));
   var bd=backupDays();
   dataDiv.appendChild(h("p",{class:"note",text:bd===null?"Nenhum backup feito ainda.":
-    "Último backup: "+(bd<=0?"hoje.":bd===1?"ontem.":"há "+bd+" dias.")}));
+    "Último backup: "+agoText(bd)+"."}));
 
   /* aceita .txt (backup mandado pelo WhatsApp) e .json (backups antigos) */
   var fileInput=h("input",{type:"file",accept:".txt,.json,text/plain,application/json",style:"display:none",onchange:function(e){
@@ -1461,7 +1469,14 @@ function renderPessoas(){
       try {
         var data=JSON.parse(ev.target.result);
         if(!Array.isArray(data.people)||!Array.isArray(data.entries)) throw new Error("Formato inválido");
-        if(!confirm("Isso vai substituir TODOS os dados atuais. Continuar?")) return;
+        /* mostra de quando é o backup e compara com o que está no celular: restaurar um
+           backup velho sem perceber faz pagamentos voltarem para "a pagar" (e serem pagos de novo) */
+        var when=data.settings&&data.settings.lastBackup, d=daysSince(when), dt=new Date(when);
+        function nOf(n,one,many){ return n+" "+(n===1?one:many); }
+        function what(o){ return nOf(o.people.length,"pessoa","pessoas")+" e "+nOf(o.entries.length,"dia registrado","dias registrados"); }
+        if(!confirm((d===null?"Backup sem data.":"Backup de "+pad(dt.getDate())+"/"+pad(dt.getMonth()+1)+"/"+dt.getFullYear()+" ("+agoText(d)+").")+
+          "\n\nNo backup: "+what(data)+".\nNeste celular agora: "+what(db)+"."+
+          "\n\nRestaurar apaga o que está neste celular e coloca o backup no lugar. Continuar?")) return;
         db.people=data.people;
         db.entries=data.entries;
         db.functions=Array.isArray(data.functions)?data.functions:[];
@@ -1536,11 +1551,14 @@ function openPersonForm(existing){
   body.appendChild(h("button",{class:"btn primary block",type:"button",text:isNew?"Cadastrar":"Salvar",onclick:function(){
     var name=iName.value.trim();
     if(!name){ toast("Preencha o nome."); return; }
+    /* sem DDD o WhatsApp não abre, e o botão de mandar o resumo some sem explicação */
+    var phone=iPhone.value.trim();
+    if(phone&&!waNumber(phone)){ toast("Coloque o WhatsApp com DDD. Ex: (11) 99999-9999"); return; }
     var rate=parseMoney(iRate.value);
     if(!(rate>0)){ toast("Preencha o valor da diária."); return; }
     if(isNew){
       db.people.push({
-        id:uid(), name:name, phone:iPhone.value.trim(), rate:rate,
+        id:uid(), name:name, phone:phone, rate:rate,
         pix:iPix.value.trim(), role:iRole.value, active:true,
         createdAt:new Date().toISOString()
       });
@@ -1560,7 +1578,7 @@ function openPersonForm(existing){
         }
       }
       p.name=name;
-      p.phone=iPhone.value.trim();
+      p.phone=phone;
       p.rate=rate;
       p.pix=iPix.value.trim();
       p.role=iRole.value;
@@ -1594,12 +1612,15 @@ var canShareFiles=(function(){
   catch(e){ return false; }
 })();
 
-/* dias desde o último backup (null = nunca fez) */
-function backupDays(){
-  var t=Date.parse(db.settings.lastBackup||"");
+/* dias desde uma data gravada (null = sem data) */
+function daysSince(when){
+  var t=Date.parse(when||"");
   if(isNaN(t)) return null;
   return Math.round((fromIso(today())-fromIso(dayOf(t)))/864e5);
 }
+function agoText(d){ return d<=0?"hoje":d===1?"ontem":"há "+d+" dias"; }
+/* dias desde o último backup (null = nunca fez) */
+function backupDays(){ return daysSince(db.settings.lastBackup); }
 
 /* aviso na Escala: some por 7 dias depois de cada backup */
 function backupNotice(){
@@ -1670,8 +1691,15 @@ document.addEventListener("visibilitychange",function(){
 if("serviceWorker" in navigator){
   var hadController=!!navigator.serviceWorker.controller, reloaded=false;
   navigator.serviceWorker.addEventListener("controllerchange",function(){
-    /* versão nova do app chegou: recarrega uma vez (os dados ficam no aparelho) */
-    if(hadController&&!reloaded){ reloaded=true; location.reload(); }
+    /* versão nova do app chegou: recarrega uma vez (os dados ficam no aparelho).
+       Com uma janela aberta (ela digitando um cadastro, conferindo um pagamento),
+       espera ela fechar, para não perder o que estava preenchido */
+    if(!hadController||reloaded) return;
+    reloaded=true;
+    (function reloadWhenFree(){
+      if(document.querySelector(".scrim")) return setTimeout(reloadWhenFree,1000);
+      location.reload();
+    })();
   });
   navigator.serviceWorker.register("sw.js",{updateViaCache:"none"}).then(function(reg){
     reg.update().catch(function(){});
