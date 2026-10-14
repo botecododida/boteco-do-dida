@@ -625,7 +625,7 @@ var ui = {
   calYear: fromIso(today()).getFullYear(),
   calMonth: fromIso(today()).getMonth(),
   selDay: today(),
-  sumAnchor: today(),
+  sumAnchor: null, /* null = escolhe sozinho o período ao entrar na aba Resumo */
   sumMode: "quinzena",
   calOpen: false,
   payAnchor: null, /* null = escolhe sozinho a quinzena ao entrar na aba */
@@ -635,7 +635,7 @@ var ui = {
    volta tudo para o dia novo (senão ela escala no dia de ontem sem perceber) */
 function resetToToday(){
   var t=today(), d=fromIso(t);
-  ui.day=t; ui.selDay=t; ui.sumAnchor=t;
+  ui.day=t; ui.selDay=t; ui.sumAnchor=null;
   ui.calYear=d.getFullYear(); ui.calMonth=d.getMonth(); ui.calOpen=false;
   ui.payAnchor=null; ui.payMarked=null;
 }
@@ -670,8 +670,8 @@ function renderNav(){
   var pending=db.entries.filter(function(e){return e.status==="trabalhou"&&!e.paid;});
   TABS.forEach(function(t){
     var b=h("button",{type:"button",onclick:function(){
-      /* cada visita à aba "A pagar" recomeça na quinzena mais antiga com pendência */
-      if(ui.tab!==t[0]){ ui.payAnchor=null; ui.payMarked=null; }
+      /* cada visita a "A pagar" e ao Resumo recomeça na quinzena que precisa de atenção */
+      if(ui.tab!==t[0]){ ui.payAnchor=null; ui.payMarked=null; ui.sumAnchor=null; }
       ui.tab=t[0]; try{localStorage.setItem(KEY+".tab",t[0]);}catch(e){} render();
     }},icon(t[2]),h("span",{text:t[1]}));
     if(t[0]===ui.tab) b.classList.add("on");
@@ -711,7 +711,7 @@ function helpSections(){
       "Registrou um pagamento por engano? Em **Já pagos**, toque em **Desfazer** e confirme."
     ]],
     ["resumo","Resumo",[
-      "Manda para cada pessoa, pelo WhatsApp, os dias que ela trabalhou e o total.",
+      "Manda para cada pessoa, pelo WhatsApp, os dias que ela trabalhou e o total. Abre na mesma quinzena de **A pagar** (a que tem gente para receber).",
       "Toque no botão verde, mande a mensagem no WhatsApp e volte para o app: o botão já mostra a próxima pessoa.",
       "O botão só aparece para quem tem WhatsApp cadastrado com DDD."
     ]],
@@ -999,6 +999,18 @@ function sortedIds(by){
 }
 function sumVal(list){ return list.reduce(function(s,e){return s+(+e.value||0);},0); }
 
+/* quinzena que precisa de atenção: a mais antiga com dia sem pagar ou sem marcar presença;
+   sem pendência, a atual. "A pagar" e Resumo abrem nela (o resumo que ela manda é o
+   da quinzena que vai pagar, não o da que acabou de começar). */
+function pendingQuinzena(){
+  var t=today();
+  var oldest=db.entries.reduce(function(m,e){
+    var pend=(e.status==="trabalhou"&&!e.paid)||(e.status==="escalado"&&e.date<t);
+    return pend&&(!m||e.date<m)?e.date:m;
+  },null);
+  return quinzena(oldest&&oldest<t?oldest:t);
+}
+
 function renderPagar(){
   var main=$("#main"); main.textContent="";
   addChild(main,header("A pagar"));
@@ -1009,15 +1021,11 @@ function renderPagar(){
   /* escalados em dia que já passou sem "Veio" nem "Faltou": ainda não entram na conta */
   var openAll=db.entries.filter(function(e){return e.status==="escalado"&&e.date<t;});
 
-  /* quinzena exibida: a escolhida, ou a mais antiga com pendência (sem pagar ou sem marcar),
-     ou a atual. Fica fixa enquanto ela estiver na aba, para a tela não pular no meio de um toque. */
+  /* quinzena exibida: a escolhida, ou a que precisa de atenção (pendingQuinzena).
+     Fica fixa enquanto ela estiver na aba, para a tela não pular no meio de um toque. */
   var q;
   if(ui.payAnchor) q=quinzena(ui.payAnchor);
-  else {
-    var oldest=pendingAll.concat(openAll).reduce(function(m,e){return !m||e.date<m?e.date:m;},null);
-    q=quinzena(oldest&&oldest<t?oldest:t);
-    ui.payAnchor=q.start;
-  }
+  else { q=pendingQuinzena(); ui.payAnchor=q.start; }
 
   /* navegação entre quinzenas */
   main.appendChild(h("div",{class:"cal-nav q-nav"},
@@ -1248,13 +1256,16 @@ function waLink(p,info,r){
 function setSumMode(m){
   ui.sumMode=m;
   try{localStorage.setItem(KEY+".sumMode",m);}catch(e){}
-  ui.sumAnchor=today();
+  ui.sumAnchor=null;
   render();
 }
 
 function renderResumo(){
   var main=$("#main"); main.textContent="";
   addChild(main,header("Resumo"));
+
+  /* quinzena: abre na mesma de "A pagar"; semana: na semana atual */
+  if(!ui.sumAnchor) ui.sumAnchor=ui.sumMode==="quinzena"?pendingQuinzena().start:today();
 
   /* escolha do período: quinzena (padrão) ou semana */
   var modes=h("div",{class:"chips seg"});
