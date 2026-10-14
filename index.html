@@ -578,7 +578,16 @@ function confirmBtn(label,armedLabel,cls,fn){
 }
 
 /* ================== modal ================== */
-function closeSheet(){ $("#overlay").textContent=""; document.removeEventListener("keydown",escClose); }
+/* logo depois de abrir ou fechar uma janela, ignora toques por um instante: o 2º toque
+   de um toque duplo não cai no que estava por baixo (fechar a janela, trocar de aba) */
+var tapGuardUntil=0;
+document.addEventListener("click",function(e){
+  if(performance.now()<tapGuardUntil){ e.preventDefault(); e.stopPropagation(); }
+},true);
+function closeSheet(){
+  $("#overlay").textContent=""; document.removeEventListener("keydown",escClose);
+  tapGuardUntil=performance.now()+350;
+}
 function escClose(e){ if(e.key==="Escape") closeSheet(); }
 function openSheet(title,body){
   closeSheet();
@@ -996,9 +1005,7 @@ function renderPagar(){
         }},icon("copy"),h("span",{text:"Copiar Pix"})));
       }
       actions.appendChild(h("button",{class:"btn ok sm",type:"button",onclick:function(){
-        var now=new Date().toISOString();
-        info.entries.forEach(function(e){e.paid=true;e.paidAt=now;});
-        commit("Pagamento de "+firstName(pName)+" registrado!");
+        openPaySheet(pName,info.entries);
       }},icon("check"),h("span",{text:"Paguei "+money(info.total)})));
       row.appendChild(actions);
       list.appendChild(row);
@@ -1035,6 +1042,45 @@ function renderPagar(){
     });
     main.appendChild(plist);
   }
+}
+
+/* "Paguei": confirma os dias antes de marcar como pago.
+   Um toque a mais, mas um toque repetido não marca a pessoa de baixo,
+   e dá para registrar só parte quando ela não consegue pagar tudo. */
+function openPaySheet(pName,entries){
+  var body=h("div",{class:"form"});
+  body.appendChild(h("p",{class:"note",text:"Desmarque o dia que ainda não pagou."}));
+  var checks=[];
+  var list=h("div",{class:"pick-list"});
+  entries.forEach(function(e){
+    var cb=h("input",{type:"checkbox",checked:true,onchange:update});
+    checks.push({id:e.id,value:+e.value||0,cb:cb});
+    list.appendChild(h("label",{class:"pick"},cb,
+      h("span",{style:"flex:1;font-weight:600;",text:WD[fromIso(e.date).getDay()]+", "+ddmm(e.date)}),
+      h("span",{class:"pay-val",text:money(e.value)})
+    ));
+  });
+  body.appendChild(list);
+  var btn=h("button",{class:"btn primary block",type:"button",onclick:function(){
+    var ids={}, n=0;
+    checks.forEach(function(c){ if(c.cb.checked){ ids[c.id]=true; n++; } });
+    if(!n) return;
+    var now=new Date().toISOString();
+    /* procura pelo id: os dados podem ter sido recarregados com a janela aberta */
+    db.entries.forEach(function(e){
+      if(ids[e.id]&&e.status==="trabalhou"&&!e.paid){ e.paid=true; e.paidAt=now; }
+    });
+    closeSheet(); commit("Pagamento de "+firstName(pName)+" registrado!");
+  }});
+  function update(){
+    var total=0, n=0;
+    checks.forEach(function(c){ if(c.cb.checked){ total+=c.value; n++; } });
+    btn.disabled=!n;
+    btn.textContent=n?"Confirmar "+money(total):"Nenhum dia marcado";
+  }
+  update();
+  body.appendChild(btn);
+  openSheet("Pagamento de "+firstName(pName),body);
 }
 
 /* ================== RESUMO ================== */
