@@ -33,6 +33,7 @@
   --warn: #9a5a00; --warn-bg: #fbecd2;
   --bad: #b3261e; --bad-bg: #fbe1de;
   --shadow: 0 1px 2px rgba(20,30,25,.06), 0 4px 16px rgba(20,30,25,.06);
+  --seg-on: #1f3b33; --seg-on-ink: #eef1ea;
   --font-display: "Bricolage Grotesque", "Trebuchet MS", system-ui, sans-serif;
   --font-body: "Figtree", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   color-scheme: light;
@@ -45,6 +46,7 @@
     --ok: #5fd39c; --ok-bg: #153527; --warn: #f2b05a; --warn-bg: #3a2a12;
     --bad: #ff8f86; --bad-bg: #3d1a17;
     --shadow: 0 1px 2px rgba(0,0,0,.3);
+    --seg-on: #f0b73e; --seg-on-ink: #261a00;
     color-scheme: dark;
   }
 }
@@ -55,6 +57,7 @@
   --ok: #5fd39c; --ok-bg: #153527; --warn: #f2b05a; --warn-bg: #3a2a12;
   --bad: #ff8f86; --bad-bg: #3d1a17;
   --shadow: 0 1px 2px rgba(0,0,0,.3);
+  --seg-on: #f0b73e; --seg-on-ink: #261a00;
   color-scheme: dark;
 }
 * { box-sizing: border-box; margin: 0; }
@@ -250,6 +253,20 @@ nav.tabs .badge {
 button.chip:hover { background: var(--surface-2); }
 .chip.active { background: var(--brand); color: var(--brand-ink); border-color: var(--brand); }
 .chip .x { font-size: .7rem; margin-left: 2px; }
+.chips.seg { margin-bottom: 12px; gap: 8px; }
+.chips.seg .chip { flex: 1; justify-content: center; min-height: 42px; font-size: .9rem; }
+.chips.seg .chip.active { background: var(--seg-on); color: var(--seg-on-ink); border-color: transparent; }
+
+/* ===== fila de envio do resumo ===== */
+.queue-hint { color: var(--muted); font-size: .8rem; margin-top: 6px; text-align: center; }
+.queue-done {
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  background: var(--ok-bg); color: var(--ok); border-radius: 12px;
+  padding: 11px 12px; font-weight: 700; font-size: .9rem;
+}
+.queue-done svg { width: 18px; height: 18px; }
+.btn.wa.sent { background: var(--surface); color: var(--muted); border-color: var(--line); }
+.sum-card .pill { align-self: flex-start; }
 
 /* ===== modal ===== */
 .scrim {
@@ -556,10 +573,12 @@ var ui = {
   calMonth: new Date().getMonth(),
   selDay: today(),
   sumAnchor: today(),
+  sumMode: "quinzena",
   calOpen: false,
   payAnchor: null /* null = escolhe sozinho a quinzena */
 };
 try { var st=localStorage.getItem(KEY+".tab"); if(st) ui.tab=st; } catch(e){}
+try { var sm=localStorage.getItem(KEY+".sumMode"); if(sm==="semana"||sm==="quinzena") ui.sumMode=sm; } catch(e){}
 
 function commit(msg){ persist(); render(); if(msg) toast(msg); }
 
@@ -679,11 +698,9 @@ function renderEscala(){
 
 function renderDayPanel(main){
   var panel=h("div",{class:"day-panel"});
-  var dayDate=fromIso(ui.selDay);
-  var dayLabel=fmtDayLong(ui.selDay);
 
-  var hdr=h("div",{style:"display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;"},
-    h("span",{class:"day-title",text:dayLabel}),
+  /* a data já aparece no botão do calendário, aqui vai só a ação */
+  var hdr=h("div",{style:"display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;"},
     h("button",{class:"btn primary sm",type:"button",onclick:openAddToDay},icon("plus"),h("span",{text:"Escalar"}))
   );
   panel.appendChild(hdr);
@@ -949,75 +966,135 @@ function renderPagar(){
 }
 
 /* ================== RESUMO ================== */
+/* período do resumo conforme o modo escolhido (quinzena = padrão) */
+function sumRange(){
+  if(ui.sumMode==="semana"){
+    var wr=weekRange(ui.sumAnchor);
+    return {start:wr.start,end:wr.end,
+      titulo:"Semana de "+ddmm(wr.start)+" a "+ddmm(wr.end),
+      label:ddmm(wr.start)+" a "+ddmm(wr.end), sub:"segunda a domingo", palavra:"semana"};
+  }
+  var q=quinzena(ui.sumAnchor);
+  return {start:q.start,end:q.end,
+    titulo:cap(q.label), label:cap(q.label), sub:q.range, palavra:"quinzena"};
+}
+function sumStep(dir){
+  if(ui.sumMode==="semana"){ ui.sumAnchor=addDays(ui.sumAnchor,dir*7); return; }
+  var q=quinzena(ui.sumAnchor);
+  ui.sumAnchor=(dir<0?prevQuinzena(q):nextQuinzena(q)).start;
+}
+/* controle de quem já recebeu o resumo do período aberto.
+   Guarda só o período atual, para não acumular lixo no aparelho. */
+var SENT_KEY=KEY+".sent";
+function periodKey(r){ return ui.sumMode+":"+r.start; }
+function sentIds(r){
+  try{
+    var s=JSON.parse(localStorage.getItem(SENT_KEY)||"{}");
+    return s.k===periodKey(r)&&Array.isArray(s.ids)?s.ids:[];
+  }catch(e){ return []; }
+}
+function saveSent(r,ids){
+  try{ localStorage.setItem(SENT_KEY,JSON.stringify({k:periodKey(r),ids:ids})); }catch(e){}
+}
+function markSent(r,pid){
+  var ids=sentIds(r);
+  if(ids.indexOf(pid)<0){ ids.push(pid); saveSent(r,ids); }
+}
+function waLink(p,info,r){
+  return "https://wa.me/"+waNumber(p.phone)+"?text="+encodeURIComponent(buildSummaryMsg(p,info,r));
+}
+
+function setSumMode(m){
+  ui.sumMode=m;
+  try{localStorage.setItem(KEY+".sumMode",m);}catch(e){}
+  ui.sumAnchor=today();
+  render();
+}
+
 function renderResumo(){
   var main=$("#main"); main.textContent="";
-  addChild(main,h("div",{class:"hdr"},h("h1",{text:"Resumo semanal"})));
+  addChild(main,h("div",{class:"hdr"},h("h1",{text:"Resumo"})));
 
-  /* nav semana */
-  var wr=weekRange(ui.sumAnchor);
-  var label=ddmm(wr.start)+" a "+ddmm(wr.end);
-  var sn=h("div",{class:"cal-nav",style:"margin-bottom:14px;"},
-    h("button",{type:"button","aria-label":"Semana anterior",onclick:function(){
-      ui.sumAnchor=addDays(ui.sumAnchor,-7); render();
+  /* escolha do período: quinzena (padrão) ou semana */
+  var modes=h("div",{class:"chips seg"});
+  [["quinzena","Quinzena"],["semana","Semana"]].forEach(function(m){
+    var c=h("button",{class:"chip"+(ui.sumMode===m[0]?" active":""),type:"button",
+      onclick:function(){ if(ui.sumMode!==m[0]) setSumMode(m[0]); }},h("span",{text:m[1]}));
+    modes.appendChild(c);
+  });
+  main.appendChild(modes);
+
+  var r=sumRange();
+  main.appendChild(h("div",{class:"cal-nav q-nav"},
+    h("button",{type:"button","aria-label":"Período anterior",onclick:function(){
+      sumStep(-1); render();
     }},icon("prev")),
-    h("span",{class:"label",text:label}),
-    h("button",{type:"button","aria-label":"Proxima semana",onclick:function(){
-      ui.sumAnchor=addDays(ui.sumAnchor,7); render();
+    h("div",{class:"label"},
+      h("div",{text:r.label}),
+      r.sub?h("small",{text:r.sub}):null
+    ),
+    h("button",{type:"button","aria-label":"Próximo período",onclick:function(){
+      sumStep(1); render();
     }},icon("next"))
-  );
-  main.appendChild(sn);
+  ));
 
-  /* entradas da semana que trabalhou */
-  var weekEntries=db.entries.filter(function(e){
-    return e.date>=wr.start&&e.date<=wr.end&&e.status==="trabalhou";
+  /* quem trabalhou no período */
+  var periodEntries=db.entries.filter(function(e){
+    return e.date>=r.start&&e.date<=r.end&&e.status==="trabalhou";
   });
 
-  if(weekEntries.length===0){
+  if(periodEntries.length===0){
     main.appendChild(h("div",{class:"empty"},
-      h("b",{text:"Nenhum registro nesta semana"}),
+      h("b",{text:"Nenhum registro nesta "+r.palavra}),
       h("span",{text:"Marque presença na aba Escala."})
     ));
     return;
   }
 
-  /* agrupar por pessoa */
-  var byPerson={};
-  weekEntries.forEach(function(e){
-    if(!byPerson[e.personId]) byPerson[e.personId]={entries:[],total:0};
-    byPerson[e.personId].entries.push(e);
-    byPerson[e.personId].total+=(+e.value||0);
-  });
+  var byPerson=groupByPerson(periodEntries);
 
-  /* botão enviar para todos */
-  var allHaveWa=true;
-  Object.keys(byPerson).forEach(function(pid){
-    var p=person(pid);
-    if(!p||!waNumber(p.phone)) allHaveWa=false;
+  /* fila de envio: o celular só deixa abrir um WhatsApp por toque,
+     então manda um de cada vez e lembra quem já recebeu */
+  var ordem=sortedIds(byPerson);
+  var comWa=ordem.filter(function(pid){
+    var p=person(pid); return p&&waNumber(p.phone);
   });
+  var jaEnviados=sentIds(r).filter(function(pid){ return comWa.indexOf(pid)>-1; });
+  var falta=comWa.filter(function(pid){ return jaEnviados.indexOf(pid)<0; });
 
-  if(Object.keys(byPerson).length>1){
-    main.appendChild(h("div",{style:"margin-bottom:8px;"},
-      h("button",{class:"btn wa block",type:"button",disabled:!allHaveWa,onclick:function(){
-        Object.keys(byPerson).forEach(function(pid){
-          var p=person(pid); if(!p) return;
-          var wa=waNumber(p.phone); if(!wa) return;
-          var msg=buildSummaryMsg(p,byPerson[pid],wr);
-          window.open("https://wa.me/"+wa+"?text="+encodeURIComponent(msg),"_blank");
-        });
-      }},icon("wa"),h("span",{text:"Enviar para todos"}))
-    ));
+  if(comWa.length>1){
+    var fila=h("div",{style:"margin-bottom:10px;"});
+    if(falta.length>0){
+      var prox=person(falta[0]);
+      var pos=comWa.length-falta.length+1;
+      fila.appendChild(h("a",{class:"btn wa block",target:"_blank",rel:"noopener",
+        href:waLink(prox,byPerson[falta[0]],r),
+        onclick:function(){ markSent(r,falta[0]); }},
+        icon("wa"),
+        h("span",{text:"Enviar para "+firstName(prox.name)+" ("+pos+" de "+comWa.length+")"})
+      ));
+      if(jaEnviados.length>0){
+        fila.appendChild(h("p",{class:"queue-hint",
+          text:jaEnviados.length+" de "+comWa.length+" já receberam. Volte aqui depois de enviar."}));
+      } else {
+        fila.appendChild(h("p",{class:"queue-hint",
+          text:"Envie um por vez: ao voltar pro app, o botão já mostra o próximo."}));
+      }
+    } else {
+      fila.appendChild(h("div",{class:"queue-done"},
+        icon("check"),h("span",{text:"Resumo enviado para todos"})));
+      fila.appendChild(h("button",{class:"btn ghost block sm",type:"button",onclick:function(){
+        saveSent(r,[]); render();
+      }},h("span",{text:"Enviar de novo"})));
+    }
+    main.appendChild(fila);
   }
 
-  var ids=Object.keys(byPerson).sort(function(a,b){
-    var pa=person(a),pb=person(b);
-    return (pa?pa.name:"ZZZ").localeCompare(pb?pb.name:"ZZZ","pt-BR");
-  });
-
-  ids.forEach(function(pid){
+  ordem.forEach(function(pid){
     var info=byPerson[pid];
     var p=person(pid);
     var pName=p?p.name:"Removido";
-    var days=info.entries.sort(function(a,b){return a.date<b.date?-1:1;});
+    var days=info.entries;
 
     var card=h("div",{class:"sum-card"},
       h("div",{class:"top"},
@@ -1028,18 +1105,21 @@ function renderResumo(){
         )
       ),
       h("div",{class:"detail"},
-        days.map(function(e){return ddmm(e.date)+" — "+money(e.value);}).join("\n").split("\n").map(function(line){
-          return h("div",{text:line});
-        })
+        days.map(function(e){ return h("div",{text:ddmm(e.date)+" — "+money(e.value)}); })
       )
     );
 
     if(p&&waNumber(p.phone)){
-      var wa=waNumber(p.phone);
-      var msg=buildSummaryMsg(p,info,wr);
+      var enviado=jaEnviados.indexOf(pid)>-1;
+      if(enviado){
+        card.querySelector(".person-info").appendChild(
+          h("span",{class:"pill ok",style:"margin-top:4px;"},icon("check"),h("span",{text:"enviado"})));
+      }
       card.appendChild(h("div",{class:"actions"},
-        h("a",{class:"btn wa sm",href:"https://wa.me/"+wa+"?text="+encodeURIComponent(msg),target:"_blank"},
-          icon("wa"),h("span",{text:"Enviar no WhatsApp"}))
+        h("a",{class:"btn wa sm"+(enviado?" sent":""),target:"_blank",rel:"noopener",
+          href:waLink(p,info,r),
+          onclick:function(){ markSent(r,pid); }},
+          icon("wa"),h("span",{text:enviado?"Enviar de novo":"Enviar no WhatsApp"}))
       ));
     }
 
@@ -1047,11 +1127,12 @@ function renderResumo(){
   });
 }
 
-function buildSummaryMsg(p,info,wr){
+function buildSummaryMsg(p,info,r){
   var lines=[];
-  lines.push("Oi "+firstName(p.name)+"! Segue seu resumo da semana ("+ddmm(wr.start)+" a "+ddmm(wr.end)+"):");
+  lines.push("Oi "+firstName(p.name)+"! Segue seu resumo da "+r.palavra+
+    " ("+ddmm(r.start)+" a "+ddmm(r.end)+"):");
   lines.push("");
-  info.entries.sort(function(a,b){return a.date<b.date?-1:1;}).forEach(function(e){
+  info.entries.slice().sort(function(a,b){return a.date<b.date?-1:1;}).forEach(function(e){
     lines.push("- "+ddmm(e.date)+" — "+money(e.value));
   });
   lines.push("");
@@ -1260,6 +1341,14 @@ function render(){
 }
 
 render();
+
+/* ao voltar do WhatsApp, atualiza a fila de envio do resumo */
+document.addEventListener("visibilitychange",function(){
+  if(document.visibilityState!=="visible") return;
+  if(ui.tab!=="resumo") return;
+  if(document.querySelector(".scrim")) return; /* não mexe com uma janela aberta */
+  render();
+});
 
 /* ================== service worker ================== */
 if("serviceWorker" in navigator){
