@@ -320,6 +320,7 @@ button.chip:hover { background: var(--surface-2); }
 /* ===== backup ===== */
 .section-title { font-family: var(--font-display); font-weight: 700; font-size: .82rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 18px 0 8px; }
 .section-title:first-child { margin-top: 0; }
+.backup-when { color: var(--muted); font-size: .8rem; text-align: center; }
 
 /* ===== pill ===== */
 .pill { display: inline-flex; align-items: center; gap: 4px; border-radius: 99px; padding: 2px 8px; font-size: .72rem; font-weight: 700; }
@@ -398,6 +399,10 @@ function loadDb(){
   return emptyDb();
 }
 var db = loadDb();
+/* pede ao navegador para não apagar os dados quando faltar espaço no celular */
+if(navigator.storage&&navigator.storage.persisted&&navigator.storage.persist){
+  navigator.storage.persisted().then(function(ok){ if(!ok) return navigator.storage.persist(); }).catch(function(){});
+}
 function persist(){
   try { localStorage.setItem(KEY,JSON.stringify(db)); return true; }
   catch(e){ toast("Sem espaço para salvar. Libere espaço no aparelho."); return false; }
@@ -619,6 +624,7 @@ function renderEscala(){
   var main=$("#main"); main.textContent="";
 
   addChild(main,h("div",{class:"hdr"},h("h1",{text:"Escala"})));
+  addChild(main,backupNotice());
 
   /* date picker button */
   var dayLabel=fmtDayLong(ui.selDay);
@@ -1196,10 +1202,15 @@ function renderPessoas(){
   var dataDiv=h("div",{style:"display:flex;flex-direction:column;gap:8px;"});
 
   dataDiv.appendChild(h("button",{class:"btn block",type:"button",onclick:exportBackup},
-    icon("down"),h("span",{text:"Exportar backup (JSON)"})));
+    icon(canShareFiles?"wa":"down"),h("span",{text:canShareFiles?"Salvar backup no WhatsApp":"Baixar backup"})));
+  var bd=backupDays();
+  dataDiv.appendChild(h("p",{class:"backup-when",text:bd===null?"Nenhum backup feito ainda.":
+    "Último backup: "+(bd<=0?"hoje.":bd===1?"ontem.":"há "+bd+" dias.")}));
 
-  var fileInput=h("input",{type:"file",accept:".json",style:"display:none",onchange:function(e){
+  /* aceita .txt (backup mandado pelo WhatsApp) e .json (backups antigos) */
+  var fileInput=h("input",{type:"file",accept:".txt,.json,text/plain,application/json",style:"display:none",onchange:function(e){
     var f=e.target.files[0]; if(!f) return;
+    e.target.value=""; /* deixa escolher o mesmo arquivo de novo */
     var reader=new FileReader();
     reader.onload=function(ev){
       try {
@@ -1218,7 +1229,7 @@ function renderPessoas(){
     reader.readAsText(f);
   }});
   dataDiv.appendChild(h("button",{class:"btn block",type:"button",onclick:function(){fileInput.click();}},
-    icon("up"),h("span",{text:"Importar backup (JSON)"})));
+    icon("up"),h("span",{text:"Restaurar backup"})));
   dataDiv.appendChild(fileInput);
 
   dataDiv.appendChild(confirmBtn("Apagar todos os dados","Confirmar: apagar tudo?","danger block",function(){
@@ -1311,14 +1322,49 @@ function openPersonForm(existing){
   openSheet(isNew?"Nova pessoa":"Editar "+firstName(existing.name),body);
 }
 
+/* backup: o arquivo vai pelo WhatsApp (ou outro app) para existir fora do celular.
+   O Chrome do Android só compartilha alguns tipos de arquivo e .json não está entre
+   eles, por isso o arquivo é .txt (o conteúdo continua sendo JSON). */
+var canShareFiles=(function(){
+  try { return !!(navigator.canShare&&navigator.canShare({files:[new File(["x"],"x.txt",{type:"text/plain"})]})); }
+  catch(e){ return false; }
+})();
+
+/* dias desde o último backup (null = nunca fez) */
+function backupDays(){
+  var t=Date.parse(db.settings.lastBackup||"");
+  if(isNaN(t)) return null;
+  return Math.round((fromIso(today())-fromIso(iso(new Date(t))))/864e5);
+}
+
+/* aviso na Escala: some por 7 dias depois de cada backup */
+function backupNotice(){
+  if(db.people.length===0) return null;
+  var d=backupDays();
+  if(d!==null&&d<7) return null;
+  return h("div",{class:"notice"},
+    h("span",{text:d===null?"Ainda sem backup.":"Faz "+d+" dias sem backup."}),
+    h("button",{class:"btn sm",type:"button",text:canShareFiles?"Salvar no WhatsApp":"Baixar backup",onclick:exportBackup}));
+}
+
 function exportBackup(){
-  db.settings.lastBackup=new Date().toISOString();
-  persist();
-  var blob=new Blob([JSON.stringify(db,null,2)],{type:"application/json"});
-  var url=URL.createObjectURL(blob);
-  var a=h("a",{href:url,download:"boteco-do-dida-backup-"+today()+".json"});
-  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-  toast("Backup exportado!");
+  var now=new Date().toISOString();
+  /* o arquivo já leva a data deste backup: ao restaurar, o aviso conta a partir dela */
+  var snap=Object.assign({},db,{settings:Object.assign({},db.settings,{lastBackup:now})});
+  var file=new File([JSON.stringify(snap,null,2)],"boteco-do-dida-backup-"+today()+".txt",{type:"text/plain"});
+  function done(msg){ db.settings.lastBackup=now; commit(msg); }
+  function download(){
+    var url=URL.createObjectURL(file);
+    var a=h("a",{href:url,download:file.name});
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){URL.revokeObjectURL(url);},60000); /* revogar na hora cancela o download no Safari */
+    done("Backup baixado.");
+  }
+  if(!canShareFiles){ download(); return; }
+  navigator.share({files:[file]}).then(function(){ done("Backup feito!"); },function(err){
+    if(err&&err.name==="AbortError") return; /* fechou sem escolher para onde mandar */
+    download();
+  });
 }
 
 /* ================== render geral ================== */
