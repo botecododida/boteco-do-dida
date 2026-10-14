@@ -415,7 +415,7 @@ function iso(d){ return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDat
 function fromIso(s){ var p=s.split("-"); return new Date(+p[0],+p[1]-1,+p[2]); }
 function today(){ return iso(new Date()); }
 function addDays(s,n){ var d=fromIso(s); d.setDate(d.getDate()+n); return iso(d); }
-var WD=["dom","seg","ter","qua","qui","sex","sab"];
+var WD=["dom","seg","ter","qua","qui","sex","sáb"];
 var WDL=["domingo","segunda-feira","terça-feira","quarta-feira","quinta-feira","sexta-feira","sábado"];
 /* dados do bar (usados no rodapé da mensagem do WhatsApp) */
 var BAR={
@@ -580,7 +580,8 @@ var ui = {
   sumAnchor: today(),
   sumMode: "quinzena",
   calOpen: false,
-  payAnchor: null /* null = escolhe sozinho a quinzena */
+  payAnchor: null, /* null = escolhe sozinho a quinzena ao entrar na aba */
+  payMarked: null  /* dias marcados agora em "Sem marcar presença" (seguem na lista até sair da aba) */
 };
 try { var st=localStorage.getItem(KEY+".tab"); if(st) ui.tab=st; } catch(e){}
 try { var sm=localStorage.getItem(KEY+".sumMode"); if(sm==="semana"||sm==="quinzena") ui.sumMode=sm; } catch(e){}
@@ -609,6 +610,8 @@ function renderNav(){
   var pending=db.entries.filter(function(e){return e.status==="trabalhou"&&!e.paid;});
   TABS.forEach(function(t){
     var b=h("button",{type:"button",onclick:function(){
+      /* cada visita à aba "A pagar" recomeça na quinzena mais antiga com pendência */
+      if(ui.tab!==t[0]){ ui.payAnchor=null; ui.payMarked=null; }
       ui.tab=t[0]; try{localStorage.setItem(KEY+".tab",t[0]);}catch(e){} render();
     }},icon(t[2]),h("span",{text:t[1]}));
     if(t[0]===ui.tab) b.classList.add("on");
@@ -752,14 +755,16 @@ function renderDayPanel(main){
   main.appendChild(panel);
 }
 
-function renderPresence(entry){
+function renderPresence(entry,onMark){
   var div=h("div",{class:"presence"});
   var isPast=entry.date<=today();
 
   var bVeio=h("button",{type:"button",text:"Veio",onclick:function(){
+    if(onMark) onMark();
     entry.status="trabalhou"; commit();
   }});
   var bFaltou=h("button",{type:"button",text:"Faltou",onclick:function(){
+    if(onMark) onMark();
     entry.status="falta"; commit();
   }});
   if(entry.status==="trabalhou") bVeio.classList.add("on-ok");
@@ -842,15 +847,20 @@ function renderPagar(){
   var main=$("#main"); main.textContent="";
   addChild(main,h("div",{class:"hdr"},h("h1",{text:"A pagar"})));
 
+  var t=today();
   var worked=db.entries.filter(function(e){return e.status==="trabalhou";});
   var pendingAll=worked.filter(function(e){return !e.paid;});
+  /* escalados em dia que já passou sem "Veio" nem "Faltou": ainda não entram na conta */
+  var openAll=db.entries.filter(function(e){return e.status==="escalado"&&e.date<t;});
 
-  /* quinzena exibida: a escolhida, ou a mais antiga com pendência, ou a atual */
+  /* quinzena exibida: a escolhida, ou a mais antiga com pendência (sem pagar ou sem marcar),
+     ou a atual. Fica fixa enquanto ela estiver na aba, para a tela não pular no meio de um toque. */
   var q;
   if(ui.payAnchor) q=quinzena(ui.payAnchor);
   else {
-    var oldest=pendingAll.reduce(function(m,e){return !m||e.date<m?e.date:m;},null);
-    q=quinzena(oldest&&oldest<today()?oldest:today());
+    var oldest=pendingAll.concat(openAll).reduce(function(m,e){return !m||e.date<m?e.date:m;},null);
+    q=quinzena(oldest&&oldest<t?oldest:t);
+    ui.payAnchor=q.start;
   }
 
   /* navegação entre quinzenas */
@@ -868,15 +878,47 @@ function renderPagar(){
   ));
 
   /* aviso de pendência em quinzenas anteriores */
-  var before=pendingAll.filter(function(e){return e.date<q.start;});
-  if(before.length>0){
+  var beforePay=pendingAll.filter(function(e){return e.date<q.start;});
+  var beforeOpen=openAll.filter(function(e){return e.date<q.start;});
+  if(beforePay.length>0||beforeOpen.length>0){
+    var before=beforePay.concat(beforeOpen);
     var oldestQ=quinzena(before.reduce(function(m,e){return e.date<m?e.date:m;},before[0].date));
+    var parts=[];
+    if(beforePay.length>0) parts.push(money(sumVal(beforePay))+" sem pagar");
+    if(beforeOpen.length>0) parts.push(beforeOpen.length+" dia"+(beforeOpen.length>1?"s":"")+" sem marcar");
     main.appendChild(h("div",{class:"notice"},
-      h("span",{text:"Tem "+money(sumVal(before))+" sem pagar de quinzena anterior."}),
+      h("span",{text:"Tem "+parts.join(" e ")+" de quinzena anterior."}),
       h("button",{class:"btn sm",type:"button",text:"Ver",onclick:function(){
         ui.payAnchor=oldestQ.start; render();
       }})
     ));
+  }
+
+  /* sem marcar presença: resolve aqui mesmo, antes de pagar.
+     O que ela marcar continua na lista até sair da aba (a linha não some debaixo do dedo). */
+  if(!ui.payMarked||ui.payMarked.q!==q.start) ui.payMarked={q:q.start,ids:{}};
+  var marked=ui.payMarked.ids;
+  var qOpen=db.entries.filter(function(e){
+    return inQ(e,q)&&(marked[e.id]||(e.status==="escalado"&&e.date<t));
+  }).sort(function(a,b){
+    return a.date<b.date?-1:a.date>b.date?1:nameOf(a).localeCompare(nameOf(b),"pt-BR");
+  });
+  var stillOpen=qOpen.filter(function(e){return e.status==="escalado";}).length;
+  if(qOpen.length>0){
+    main.appendChild(h("div",{class:"section-title",style:"color:var(--warn);",text:"Sem marcar presença"}));
+    var olist=h("div",{style:"margin-bottom:14px;"});
+    qOpen.forEach(function(entry){
+      var pName=nameOf(entry);
+      olist.appendChild(h("div",{class:"person-row"},
+        h("span",{class:"avatar",text:initials(pName)}),
+        h("div",{class:"person-info"},
+          h("b",{text:pName}),
+          h("span",{text:WD[fromIso(entry.date).getDay()]+", "+ddmm(entry.date)+" · "+money(entry.value)})
+        ),
+        renderPresence(entry,function(){ marked[entry.id]=true; })
+      ));
+    });
+    main.appendChild(olist);
   }
 
   var qWorked=worked.filter(function(e){return inQ(e,q);});
@@ -884,7 +926,7 @@ function renderPagar(){
   var qPaid=qWorked.filter(function(e){return e.paid;});
 
   if(qWorked.length===0){
-    main.appendChild(h("div",{class:"empty"},
+    if(stillOpen===0) main.appendChild(h("div",{class:"empty"},
       h("b",{text:"Ninguém trabalhou nesta quinzena"}),
       h("span",{text:"Os dias marcados como \"Veio\" aparecem aqui."})
     ));
@@ -902,9 +944,9 @@ function renderPagar(){
     )
   ));
 
-  /* pendentes */
+  /* pendentes ("Quinzena paga!" só quando não sobrou dia sem marcar) */
   if(qPending.length===0){
-    main.appendChild(h("div",{class:"empty",style:"padding:18px 16px;"},
+    if(stillOpen===0) main.appendChild(h("div",{class:"empty",style:"padding:18px 16px;"},
       h("b",{text:"Quinzena paga!"}),
       h("span",{text:"Todo mundo desta quinzena já recebeu."})
     ));
@@ -1231,10 +1273,6 @@ function renderPessoas(){
   dataDiv.appendChild(h("button",{class:"btn block",type:"button",onclick:function(){fileInput.click();}},
     icon("up"),h("span",{text:"Restaurar backup"})));
   dataDiv.appendChild(fileInput);
-
-  dataDiv.appendChild(confirmBtn("Apagar todos os dados","Confirmar: apagar tudo?","danger block",function(){
-    db=emptyDb(); commit("Dados apagados.");
-  }));
   main.appendChild(dataDiv);
 }
 
