@@ -741,16 +741,19 @@ function renderEscala(){
 function renderDayPanel(main){
   var panel=h("div",{class:"day-panel"});
 
-  /* a data já aparece no botão do calendário, aqui vai só a ação */
-  var hdr=h("div",{style:"display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;"},
-    h("button",{class:"btn primary sm",type:"button",onclick:openAddToDay},icon("plus"),h("span",{text:"Escalar"}))
-  );
-  panel.appendChild(hdr);
-
   /* entradas do dia */
   var dayEntries=db.entries.filter(function(e){return e.date===ui.selDay;}).sort(function(a,b){
     return nameOf(a).localeCompare(nameOf(b),"pt-BR");
   });
+
+  /* a data já aparece no botão do calendário, aqui vai só a ação
+     (com gente no dia, a mesma lista serve para pôr e para tirar) */
+  var hdr=h("div",{style:"display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;"},
+    dayEntries.length>0
+      ? h("button",{class:"btn primary sm",type:"button",onclick:openAddToDay},icon("edit"),h("span",{text:"Editar escala"}))
+      : h("button",{class:"btn primary sm",type:"button",onclick:openAddToDay},icon("plus"),h("span",{text:"Escalar"}))
+  );
+  panel.appendChild(hdr);
 
   if(dayEntries.length===0){
     panel.appendChild(h("div",{class:"empty"},
@@ -807,52 +810,73 @@ function renderPresence(entry,onMark){
   return div;
 }
 
+/* escala do dia: marcar põe na escala; desmarcar tira. Só dá para tirar quem ainda
+   está sem "Veio"/"Faltou" e sem pagamento: aí não se perde nada de dinheiro. */
 function openAddToDay(){
-  var active=db.people.filter(function(p){return p.active!==false;}).sort(function(a,b){return a.name.localeCompare(b.name,"pt-BR");});
-  if(active.length===0){
+  var day=ui.selDay;
+  var byPerson={};
+  db.entries.forEach(function(e){
+    if(e.date===day) (byPerson[e.personId]=byPerson[e.personId]||[]).push(e);
+  });
+  /* ativos, mais quem já está neste dia (mesmo que tenha sido desativado depois) */
+  var list=db.people.filter(function(p){return p.active!==false||byPerson[p.id];})
+    .sort(function(a,b){return a.name.localeCompare(b.name,"pt-BR");});
+  if(list.length===0){
     toast("Cadastre pessoas primeiro na aba Pessoas.");
     return;
   }
-  var existing={};
-  db.entries.forEach(function(e){if(e.date===ui.selDay) existing[e.personId]=true;});
 
   var checks=[];
   var body=h("div",{class:"form"});
 
   var pickList=h("div",{class:"pick-list"});
-  active.forEach(function(p){
-    var already=!!existing[p.id];
-    var cb=h("input",{type:"checkbox",checked:already,disabled:already});
-    checks.push({person:p,cb:cb,already:already});
-    pickList.appendChild(h("div",{class:"pick"},
+  list.forEach(function(p){
+    var mine=byPerson[p.id]||[];
+    var already=mine.length>0;
+    var done=mine.filter(function(e){return e.status!=="escalado"||e.paid;})[0];
+    var normal=(p.role?p.role+" · ":"")+money(already?mine[0].value:p.rate);
+    var sub=h("span",{text:done?(done.paid?"Pago":done.status==="trabalhou"?"Marcado: veio":"Marcado: faltou"):normal});
+    var cb=h("input",{type:"checkbox",checked:already,disabled:!!done,onchange:function(){
+      /* desmarcou quem já estava: mostra na hora que vai sair */
+      if(!already) return;
+      sub.textContent=cb.checked?normal:"Vai sair da escala";
+      sub.style.color=cb.checked?"":"var(--bad)";
+    }});
+    checks.push({person:p,cb:cb,already:already,entries:mine});
+    pickList.appendChild(h("label",{class:"pick"},
       cb,
-      h("div",{class:"person-info",style:"flex:1;"},
-        h("b",{text:p.name}),
-        h("span",{text:(p.role||"")+" · "+money(p.rate)})
-      )
+      h("div",{class:"person-info",style:"flex:1;"},h("b",{text:p.name}),sub)
     ));
   });
   body.appendChild(pickList);
-  body.appendChild(h("button",{class:"btn primary block",type:"button",text:"Confirmar escala",onclick:function(){
-    var added=0;
+  body.appendChild(h("button",{class:"btn primary block",type:"button",text:"Confirmar",onclick:function(){
+    var added=0, removed=0, out={};
     checks.forEach(function(c){
       if(c.cb.checked&&!c.already){
         db.entries.push({
-          id:uid(), personId:c.person.id, date:ui.selDay,
+          id:uid(), personId:c.person.id, date:day,
           role:c.person.role, value:c.person.rate,
           status:"escalado", paid:false, paidAt:null, createdAt:new Date().toISOString()
         });
         added++;
+      } else if(!c.cb.checked&&c.already&&!c.cb.disabled){
+        c.entries.forEach(function(e){ out[e.id]=true; });
+        removed++;
       }
     });
-    if(added>0){
-      closeSheet(); commit(added+" pessoa"+(added>1?"s":"")+" escalada"+(added>1?"s":"")+".");
-    } else {
-      toast("Selecione pelo menos uma pessoa.");
+    if(!added&&!removed){
+      toast(checks.some(function(c){return c.already;})?"Nada mudou.":"Selecione pelo menos uma pessoa.");
+      return;
     }
+    /* procura pelo id e confere de novo: os dados podem ter mudado com a janela aberta */
+    db.entries=db.entries.filter(function(e){ return !(out[e.id]&&e.status==="escalado"&&!e.paid); });
+    var msg=[];
+    if(added) msg.push(added+" pessoa"+(added>1?"s":"")+" escalada"+(added>1?"s":""));
+    if(removed) msg.push(removed+(added?"":" pessoa"+(removed>1?"s":""))+" tirada"+(removed>1?"s":"")+" da escala");
+    closeSheet(); commit(msg.join(", ")+".");
   }}));
 
-  openSheet("Escalar para "+ddmm(ui.selDay),body);
+  openSheet("Escala de "+ddmm(day),body);
 }
 
 /* ================== A PAGAR ================== */
