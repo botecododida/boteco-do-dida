@@ -85,7 +85,7 @@ nav.tabs {
 nav.tabs button {
   flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
   background: 0; border: 0; border-radius: 12px; padding: 7px 2px; min-height: 54px;
-  color: var(--brand-muted); font-size: .68rem; font-weight: 600; position: relative;
+  color: var(--brand-muted); font-size: .8rem; font-weight: 600; position: relative;
 }
 nav.tabs button svg { width: 24px; height: 24px; }
 nav.tabs button.on { color: var(--brand-ink); background: var(--brand-2); }
@@ -93,7 +93,7 @@ nav.tabs button.on svg { color: var(--accent); }
 nav.tabs .badge {
   position: absolute; top: 4px; right: calc(50% - 20px);
   background: var(--accent); color: var(--accent-ink); border-radius: 99px;
-  font-size: .62rem; font-weight: 800; min-width: 18px; height: 18px;
+  font-size: .7rem; font-weight: 800; min-width: 20px; height: 20px;
   display: flex; align-items: center; justify-content: center; padding: 0 5px;
 }
 
@@ -132,7 +132,7 @@ nav.tabs .badge {
 .cal-nav button { width: 38px; height: 38px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface-2); display: flex; align-items: center; justify-content: center; }
 .cal-nav button svg { width: 18px; height: 18px; }
 .cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; width: 100%; }
-.cal .wd { text-align: center; font-size: .7rem; font-weight: 700; color: var(--muted); text-transform: uppercase; padding: 2px 0; }
+.cal .wd { text-align: center; font-size: .76rem; font-weight: 700; color: var(--muted); text-transform: uppercase; padding: 2px 0; }
 .cal .day {
   aspect-ratio: 1; border-radius: 10px; border: 0; background: var(--surface-2); color: var(--ink);
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
@@ -147,6 +147,9 @@ nav.tabs .badge {
   position: absolute; bottom: 3px;
 }
 .cal .day.sel.has::after { background: var(--brand-ink); }
+/* dia que já passou com alguém sem "Veio"/"Faltou": bolinha vermelha e maior */
+.cal .day.has.open::after { background: var(--bad); width: 7px; height: 7px; }
+.cal .day.sel.has.open::after { background: #ff8f86; }
 
 /* ===== dia (escala do dia selecionado) ===== */
 .day-panel { margin-top: 14px; }
@@ -163,17 +166,17 @@ nav.tabs .badge {
 }
 .person-info { flex: 1; min-width: 0; }
 .person-info b { display: block; font-weight: 700; overflow-wrap: anywhere; font-size: .95rem; }
-.person-info span { color: var(--muted); font-size: .82rem; }
+.person-info span { color: var(--muted); font-size: .87rem; }
 .presence { display: flex; gap: 6px; flex: none; }
 .presence button {
-  min-height: 42px; min-width: 68px; border-radius: 10px; border: 1px solid var(--line);
-  background: var(--surface); font-weight: 700; font-size: .82rem; color: var(--muted);
+  min-height: 46px; min-width: 70px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--surface); font-weight: 700; font-size: .9rem; color: var(--muted);
 }
 .presence button.on-ok { background: var(--ok); color: #fff; border-color: transparent; }
 .presence button.on-bad { background: var(--bad); color: #fff; border-color: transparent; }
 .presence button.later { opacity: .45; }
 .presence button.paid-lock {
-  min-width: 142px; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-width: 146px; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   background: var(--ok-bg); color: var(--ok); border-color: transparent;
 }
 .presence button.paid-lock svg { width: 16px; height: 16px; }
@@ -186,9 +189,9 @@ nav.tabs .badge {
 .pay-row:first-child { border-top: 0; }
 .pay-info { flex: 1; min-width: 0; }
 .pay-info b { display: block; font-weight: 700; }
-.pay-info span { color: var(--muted); font-size: .85rem; }
+.pay-info span { color: var(--muted); font-size: .88rem; }
 .pay-val { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; font-size: 1rem; }
-.pay-actions { display: flex; gap: 6px; width: 100%; padding-left: 50px; }
+.pay-actions { display: flex; gap: 6px; width: 100%; padding-left: 50px; flex-wrap: wrap; }
 .pay-actions button { flex: 1; }
 .pay-row.paid .pay-info b, .pay-row.paid .pay-val { color: var(--muted); }
 .pay-row.paid .avatar { background: var(--surface-2); color: var(--muted); }
@@ -236,11 +239,26 @@ nav.tabs .badge {
 .btn.danger { color: var(--bad); }
 .btn.danger.armed { background: var(--bad); color: #fff; border-color: transparent; }
 .btn.ghost { background: 0; border-color: transparent; }
-.btn.sm { min-height: 38px; padding: 0 10px; font-size: .82rem; }
+.btn.sm { min-height: 44px; padding: 0 12px; font-size: .9rem; }
 .btn.block { width: 100%; }
 .btn[disabled] { opacity: .45; cursor: default; }
 .icon-btn { width: 44px; height: 44px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); display: inline-flex; align-items: center; justify-content: center; flex: none; }
 .icon-btn svg { width: 20px; height: 20px; }
+
+/* ===== toque e destaque ===== */
+/* o app desliga o "piscar" padrão do toque: no lugar, o botão afunda e escurece de leve
+   na hora, para ela ver que o toque pegou (e não tocar de novo) */
+button, .btn { transition: transform .08s ease, filter .08s ease; }
+button:active:not([disabled]), .btn:active { transform: scale(.96); filter: brightness(.92); }
+/* destaque rápido de onde algo foi parar (linha paga, gente recém-escalada): só cor, sem movimento */
+@keyframes flash { from { background-color: var(--ok-bg); } to { background-color: transparent; } }
+.flash { animation: flash 1.4s ease-out; border-radius: 10px; }
+.total-card.flash { animation-name: flash-card; }
+@keyframes flash-card { from { box-shadow: 0 0 0 3px var(--ok); } to { box-shadow: 0 0 0 3px transparent; } }
+@media (prefers-reduced-motion: reduce) {
+  button, .btn { transition: none; }
+  button:active:not([disabled]), .btn:active { transform: none; }
+}
 
 /* ===== formulários ===== */
 .field { display: flex; flex-direction: column; gap: 5px; }
@@ -250,7 +268,7 @@ nav.tabs .badge {
   background: var(--surface-2); padding: 0 12px; width: 100%;
 }
 .field textarea { padding: 10px 12px; min-height: 70px; resize: vertical; }
-.field .hint { font-size: .78rem; color: var(--muted); }
+.field .hint { font-size: .84rem; color: var(--muted); }
 .form { display: flex; flex-direction: column; gap: 12px; }
 
 /* ===== chips ===== */
@@ -268,7 +286,7 @@ button.chip:hover { background: var(--surface-2); }
 .chips.seg .chip.active { background: var(--seg-on); color: var(--seg-on-ink); border-color: transparent; }
 
 /* ===== fila de envio do resumo ===== */
-.queue-hint { color: var(--muted); font-size: .8rem; margin-top: 6px; text-align: center; }
+.queue-hint { color: var(--muted); font-size: .87rem; margin-top: 6px; text-align: center; }
 .queue-done {
   display: flex; align-items: center; justify-content: center; gap: 7px;
   background: var(--ok-bg); color: var(--ok); border-radius: 12px;
@@ -336,10 +354,10 @@ button.chip:hover { background: var(--surface-2); }
 /* ===== backup ===== */
 .section-title { font-family: var(--font-display); font-weight: 700; font-size: .82rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 18px 0 8px; }
 .section-title:first-child { margin-top: 0; }
-.note { color: var(--muted); font-size: .8rem; text-align: center; }
+.note { color: var(--muted); font-size: .87rem; text-align: center; }
 
 /* ===== pill ===== */
-.pill { display: inline-flex; align-items: center; gap: 4px; border-radius: 99px; padding: 2px 8px; font-size: .72rem; font-weight: 700; }
+.pill { display: inline-flex; align-items: center; gap: 4px; border-radius: 99px; padding: 2px 8px; font-size: .78rem; font-weight: 700; }
 .pill.ok { background: var(--ok-bg); color: var(--ok); }
 .pill.warn { background: var(--warn-bg); color: var(--warn); }
 
@@ -352,7 +370,7 @@ button.chip:hover { background: var(--surface-2); }
   border-radius: 12px; padding: 10px 12px; min-width: 0;
 }
 .total-card.hl { background: var(--brand); border-color: transparent; color: var(--brand-ink); }
-.total-card .lbl { font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.total-card .lbl { font-size: .75rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
 .total-card.hl .lbl { color: var(--brand-muted); }
 .total-card .val { font-family: var(--font-display); font-weight: 700; font-size: 1.3rem; font-variant-numeric: tabular-nums; }
 .total-card.hl .val { color: var(--accent); }
@@ -620,6 +638,8 @@ function confirmBtn(label,armedLabel,cls,fn){
 /* logo depois de abrir ou fechar uma janela, ignora toques por um instante: o 2º toque
    de um toque duplo não cai no que estava por baixo (fechar a janela, trocar de aba) */
 var tapGuardUntil=0;
+/* no iPhone, o efeito de "afundar" do botão (:active) só aparece se a página escutar toques */
+document.addEventListener("touchstart",function(){},{passive:true});
 document.addEventListener("click",function(e){
   if(performance.now()<tapGuardUntil){ e.preventDefault(); e.stopPropagation(); }
 },true);
@@ -662,6 +682,12 @@ function resetToToday(){
 }
 try { var st=localStorage.getItem(KEY+".tab"); if(st) ui.tab=st; } catch(e){}
 try { var sm=localStorage.getItem(KEY+".sumMode"); if(sm==="semana"||sm==="quinzena") ui.sumMode=sm; } catch(e){}
+
+/* destaque rápido no que acabou de mudar: a ação marca o que destacar e a próxima
+   vez que a tela é desenhada aplica (render limpa depois) */
+var flashNext={};
+function flashLater(key){ flashNext[key]=true; }
+function flashIf(el,key){ if(flashNext[key]) el.classList.add("flash"); return el; }
 
 function commit(msg){
   /* não salvou: volta para o que está gravado, para a tela não mostrar algo que não ficou salvo */
@@ -731,7 +757,8 @@ function helpSections(){
       "Depois do turno, marque **Veio** ou **Faltou** em cada pessoa. Só quem tem **Veio** entra no pagamento. Dia que ainda não chegou não dá para marcar.",
       "Depois da meia-noite, até as 6h, o app continua no dia do turno da noite. Assim dá para marcar a presença no fim do expediente.",
       "Marcou errado? É só tocar no outro botão. Se o dia já foi pago (aparece **Pago**), desfaça o pagamento em **A pagar** antes.",
-      "Escalou a pessoa errada? Toque em **Editar escala** e desmarque. Quem já tem Veio ou Faltou não pode ser tirado."
+      "Escalou a pessoa errada? Toque em **Editar escala** e desmarque. Quem já tem Veio ou Faltou não pode ser tirado.",
+      "No calendário, a bolinha mostra os dias com gente escalada. **Bolinha vermelha**: dia que já passou com alguém sem Veio ou Faltou."
     ]],
     ["pagar","A pagar",[
       "Mostra quanto cada pessoa tem a receber na quinzena: do dia 1 ao 15 e do dia 16 ao fim do mês. As setas trocam de quinzena.",
@@ -832,10 +859,14 @@ function renderEscala(){
   var daysInMonth=new Date(ui.calYear,ui.calMonth+1,0).getDate();
   var t=today();
 
-  var daysWithEntries={};
+  /* bolinha: dia com gente escalada; vermelha se o dia já passou e alguém ficou sem marcar */
+  var daysWithEntries={}, daysOpen={};
   db.entries.forEach(function(e){
     var d=fromIso(e.date);
-    if(d.getMonth()===ui.calMonth&&d.getFullYear()===ui.calYear) daysWithEntries[e.date]=true;
+    if(d.getMonth()===ui.calMonth&&d.getFullYear()===ui.calYear){
+      daysWithEntries[e.date]=true;
+      if(e.status==="escalado"&&e.date<t) daysOpen[e.date]=true;
+    }
   });
 
   for(var i=0;i<startDow;i++) cal.appendChild(h("button",{class:"day empty",disabled:true}));
@@ -846,6 +877,7 @@ function renderEscala(){
     if(ds===t) cls+=" today";
     if(ds===ui.selDay) cls+=" sel";
     if(daysWithEntries[ds]) cls+=" has";
+    if(daysOpen[ds]) cls+=" open";
     (function(ds){
       cal.appendChild(h("button",{class:cls,type:"button",text:String(d),onclick:function(){
         ui.selDay=ds; ui.calOpen=false; render();
@@ -896,7 +928,7 @@ function renderDayPanel(main){
         ),
         renderPresence(entry)
       );
-      list.appendChild(row);
+      list.appendChild(flashIf(row,"entry:"+entry.id));
     });
     panel.appendChild(list);
 
@@ -984,8 +1016,9 @@ function openAddToDay(){
     var added=0, removed=0, out={};
     checks.forEach(function(c){
       if(c.cb.checked&&!c.already){
+        var nid=uid(); flashLater("entry:"+nid);
         db.entries.push({
-          id:uid(), personId:c.person.id, date:day,
+          id:nid, personId:c.person.id, date:day,
           role:c.person.role, value:c.person.rate,
           status:"escalado", paid:false, paidAt:null, createdAt:new Date().toISOString()
         });
@@ -1134,10 +1167,10 @@ function renderPagar(){
       h("div",{class:"lbl",text:"Falta pagar"}),
       h("div",{class:"val",text:money(sumVal(qPending))})
     ),
-    h("div",{class:"total-card"},
+    flashIf(h("div",{class:"total-card"},
       h("div",{class:"lbl",text:"Já pago"}),
       h("div",{class:"val",text:money(sumVal(qPaid))})
-    )
+    ),"total-paid")
   ));
 
   /* pendentes ("Quinzena paga!" só quando não sobrou dia sem marcar) */
@@ -1187,14 +1220,14 @@ function renderPagar(){
       var n=info.entries.length;
       var last=info.entries.reduce(function(m,e){return e.paidAt&&e.paidAt>m?e.paidAt:m;},"");
       var when=last?" · pago "+ddmm(iso(new Date(last))):"";
-      var row=h("div",{class:"pay-row paid"},
+      var row=flashIf(h("div",{class:"pay-row paid"},
         h("span",{class:"avatar",text:initials(pName)}),
         h("div",{class:"pay-info"},
           h("b",{text:pName}),
           h("span",{text:n+" dia"+(n>1?"s":"")+when})
         ),
         h("span",{class:"pay-val",text:money(info.total)})
-      );
+      ),"paid:"+pid);
       var actions=h("div",{class:"pay-actions"});
       actions.appendChild(confirmBtn("Desfazer","Confirmar?","sm danger",function(){
         info.entries.forEach(function(e){e.paid=false;e.paidAt=null;});
@@ -1233,6 +1266,7 @@ function openPaySheet(pName,entries){
     db.entries.forEach(function(e){
       if(ids[e.id]&&e.status==="trabalhou"&&!e.paid){ e.paid=true; e.paidAt=now; }
     });
+    flashLater("paid:"+entries[0].personId); flashLater("total-paid");
     closeSheet(); commit("Pagamento de "+firstName(pName)+" registrado!");
   }});
   function update(){
@@ -1718,6 +1752,7 @@ function render(){
   else if(ui.tab==="resumo") renderResumo();
   else if(ui.tab==="pessoas") renderPessoas();
   renderFooter();
+  flashNext={};
 }
 
 render();
