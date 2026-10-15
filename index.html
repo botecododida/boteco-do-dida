@@ -407,9 +407,14 @@ function emptyDb(){
 /* texto que esta janela leu ou gravou por último: se o salvo mudar sem ser por ela,
    foi outra janela do app (aba do navegador + app instalado usam os mesmos dados) */
 var savedJson = null;
+/* dados salvos que não deu para ler: em vez de começar vazio e gravar por cima, guarda uma
+   cópia à parte (que também vai junto no backup, para dar para recuperar). Se nem a cópia
+   couber, o app não grava nada até alguém olhar. */
+var DAMAGED = KEY+".danificado.", dbLocked = false, lastDamaged = null;
 function loadDb(){
+  var raw = null;
   try {
-    var raw = localStorage.getItem(KEY);
+    raw = localStorage.getItem(KEY);
     savedJson = raw;
     var r = JSON.parse(raw||"null");
     if(r && Array.isArray(r.people) && Array.isArray(r.entries)){
@@ -418,7 +423,17 @@ function loadDb(){
       return r;
     }
   } catch(e){}
+  if(raw && raw!==lastDamaged){
+    lastDamaged = raw;
+    try { localStorage.setItem(DAMAGED+Date.now(), raw); localStorage.removeItem(KEY+".danificado-visto"); }
+    catch(e){ dbLocked = true; }
+  }
   return emptyDb();
+}
+function damagedKeys(){
+  var ks=[];
+  try { for(var i=0;i<localStorage.length;i++){ var k=localStorage.key(i); if(k&&k.indexOf(DAMAGED)===0) ks.push(k); } } catch(e){}
+  return ks.sort();
 }
 var db = loadDb();
 /* pede ao navegador para não apagar os dados quando faltar espaço no celular */
@@ -426,6 +441,7 @@ if(navigator.storage&&navigator.storage.persisted&&navigator.storage.persist){
   navigator.storage.persisted().then(function(ok){ if(!ok) return navigator.storage.persist(); }).catch(function(){});
 }
 function persist(){
+  if(dbLocked){ toast("Os dados deste celular estão danificados. Chame quem instalou o app antes de continuar."); return false; }
   try {
     if(localStorage.getItem(KEY)!==savedJson){
       /* outra janela salvou e esta não ficou sabendo: não grava por cima */
@@ -672,19 +688,28 @@ function renderNav(){
   /* mostra brand só em tablet via CSS */
   if(window.innerWidth>=860) brand.hidden=false; else brand.hidden=true;
 
-  var pending=db.entries.filter(function(e){return e.status==="trabalhou"&&!e.paid;});
+  /* número na aba "A pagar": pessoas com algo para resolver agora (quinzena que já fechou
+     sem pagar, ou dia que passou sem marcar presença). O que é da quinzena em andamento
+     não conta, senão o número fica aceso o tempo todo e ela para de olhar. */
+  var td=today(), curQ=quinzena(td).start, need={};
+  db.entries.forEach(function(e){
+    if((e.status==="trabalhou"&&!e.paid&&e.date<curQ)||(e.status==="escalado"&&e.date<td)) need[e.personId]=true;
+  });
+  var pending=Object.keys(need).length;
   TABS.forEach(function(t){
-    var b=h("button",{type:"button",onclick:function(){
-      /* cada visita a "A pagar" e ao Resumo recomeça na quinzena que precisa de atenção */
-      if(ui.tab!==t[0]){ ui.payAnchor=null; ui.payMarked=null; ui.sumAnchor=null; }
-      ui.tab=t[0]; try{localStorage.setItem(KEY+".tab",t[0]);}catch(e){} render();
-    }},icon(t[2]),h("span",{text:t[1]}));
+    var b=h("button",{type:"button",onclick:function(){ goTab(t[0]); }},icon(t[2]),h("span",{text:t[1]}));
     if(t[0]===ui.tab) b.classList.add("on");
-    if(t[0]==="pagar"&&pending.length>0){
-      addChild(b,h("span",{class:"badge",text:String(pending.length)}));
+    if(t[0]==="pagar"&&pending>0){
+      addChild(b,h("span",{class:"badge",text:String(pending)}));
     }
     nav.appendChild(b);
   });
+}
+function goTab(tab){
+  /* cada visita a "A pagar" e ao Resumo recomeça na quinzena que precisa de atenção */
+  if(ui.tab!==tab){ ui.payAnchor=null; ui.payMarked=null; ui.sumAnchor=null; }
+  ui.tab=tab; try{localStorage.setItem(KEY+".tab",tab);}catch(e){}
+  render();
 }
 
 /* ================== manual ================== */
@@ -713,7 +738,8 @@ function helpSections(){
       "Se aparecer **Sem marcar presença**, marque Veio ou Faltou ali mesmo. Quem fica sem marcar não entra na conta.",
       "**Copiar Pix** copia a chave da pessoa para você colar no app do banco.",
       "Depois de pagar no banco, toque em **Paguei**, confira os dias e toque em **Confirmar**. Pagou só uma parte? Desmarque os dias que ficaram faltando.",
-      "Registrou um pagamento por engano? Em **Já pagos**, toque em **Desfazer** e confirme."
+      "Registrou um pagamento por engano? Em **Já pagos**, toque em **Desfazer** e confirme.",
+      "O número na aba **A pagar** mostra quantas pessoas têm algo para resolver: quinzena que já fechou sem pagar ou dia que passou sem marcar presença."
     ]],
     ["resumo","Resumo",[
       "Manda para cada pessoa, pelo WhatsApp, os dias que ela trabalhou e o total. Abre na mesma quinzena de **A pagar** (a que tem gente para receber).",
@@ -755,6 +781,7 @@ function renderEscala(){
   var main=$("#main"); main.textContent="";
 
   addChild(main,header("Escala"));
+  addChild(main,damagedNotice());
   addChild(main,backupNotice());
 
   /* date picker button */
@@ -1481,6 +1508,7 @@ function renderPessoas(){
         db.entries=data.entries;
         db.functions=Array.isArray(data.functions)?data.functions:[];
         db.settings=Object.assign(emptyDb().settings,data.settings||{});
+        try{ localStorage.setItem(KEY+".danificado-visto","1"); }catch(e){}
         commit("Backup restaurado com sucesso!");
       } catch(err){
         toast("Arquivo inválido. Use um backup exportado daqui.");
@@ -1622,6 +1650,23 @@ function agoText(d){ return d<=0?"hoje":d===1?"ontem":"há "+d+" dias"; }
 /* dias desde o último backup (null = nunca fez) */
 function backupDays(){ return daysSince(db.settings.lastBackup); }
 
+/* aviso de dados danificados: some quando ela restaura um backup ou toca em "Entendi"
+   (a cópia continua guardada e segue indo junto nos backups) */
+function damagedNotice(){
+  var seen=null;
+  try { seen=localStorage.getItem(KEY+".danificado-visto"); } catch(e){}
+  if(!dbLocked&&(seen||!damagedKeys().length)) return null;
+  return h("div",{class:"notice",style:"flex-wrap:wrap;background:var(--bad-bg);color:var(--bad);"},
+    h("span",{style:"flex:1 1 100%;",text:dbLocked
+      ?"Os dados deste celular estão danificados e o app não está salvando nada. Chame quem instalou o app."
+      :"Os dados deste celular estavam danificados. Se tiver backup, restaure em Pessoas."}),
+    dbLocked?null:h("button",{class:"btn sm",type:"button",text:"Restaurar",onclick:function(){ goTab("pessoas"); }}),
+    dbLocked?null:h("button",{class:"btn sm",type:"button",text:"Entendi",onclick:function(){
+      try{ localStorage.setItem(KEY+".danificado-visto","1"); }catch(e){}
+      render();
+    }}));
+}
+
 /* aviso na Escala: some por 7 dias depois de cada backup */
 function backupNotice(){
   if(db.people.length===0) return null;
@@ -1636,6 +1681,10 @@ function exportBackup(){
   var now=new Date().toISOString();
   /* o arquivo já leva a data deste backup: ao restaurar, o aviso conta a partir dela */
   var snap=Object.assign({},db,{settings:Object.assign({},db.settings,{lastBackup:now})});
+  /* cópia de dados danificados (se houver) vai junto, para dar para recuperar fora do celular */
+  var dmg=damagedKeys().map(function(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } });
+  if(dbLocked&&lastDamaged) dmg.push(lastDamaged);
+  if(dmg.length) snap.danificado=dmg;
   var file=new File([JSON.stringify(snap,null,2)],"boteco-do-dida-backup-"+today()+".txt",{type:"text/plain"});
   function done(msg){ db.settings.lastBackup=now; commit(msg); }
   function download(){
