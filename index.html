@@ -147,9 +147,6 @@ nav.tabs .badge {
   position: absolute; bottom: 3px;
 }
 .cal .day.sel.has::after { background: var(--brand-ink); }
-/* dia que já passou com alguém sem "Veio"/"Faltou": bolinha vermelha e maior */
-.cal .day.has.open::after { background: var(--bad); width: 7px; height: 7px; }
-.cal .day.sel.has.open::after { background: #ff8f86; }
 
 /* ===== dia (escala do dia selecionado) ===== */
 .day-panel { margin-top: 14px; }
@@ -168,16 +165,11 @@ nav.tabs .badge {
 .person-info b { display: block; font-weight: 700; overflow-wrap: anywhere; font-size: .95rem; }
 .person-info span { color: var(--muted); font-size: .87rem; }
 .presence { display: flex; gap: 6px; flex: none; }
-.presence button {
-  min-height: 46px; min-width: 70px; border-radius: 10px; border: 1px solid var(--line);
-  background: var(--surface); font-weight: 700; font-size: .9rem; color: var(--muted);
-}
-.presence button.on-ok { background: var(--ok); color: #fff; border-color: transparent; }
-.presence button.on-bad { background: var(--bad); color: #fff; border-color: transparent; }
-.presence button.later { opacity: .45; }
+.presence .btn { min-width: 76px; }
 .presence button.paid-lock {
-  min-width: 146px; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  background: var(--ok-bg); color: var(--ok); border-color: transparent;
+  min-width: 100px; min-height: 44px; border-radius: 10px; border: 0; font-weight: 700; font-size: .9rem;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  background: var(--ok-bg); color: var(--ok);
 }
 .presence button.paid-lock svg { width: 16px; height: 16px; }
 
@@ -436,6 +428,7 @@ function loadDb(){
     savedJson = raw;
     var r = JSON.parse(raw||"null");
     if(r && Array.isArray(r.people) && Array.isArray(r.entries)){
+      normalizeDb(r);
       if(!Array.isArray(r.functions)) r.functions = [];
       r.settings = Object.assign(emptyDb().settings, r.settings||{});
       return r;
@@ -488,6 +481,15 @@ function fromIso(s){ var p=s.split("-"); return new Date(+p[0],+p[1]-1,+p[2]); }
    porque o turno da noite passa da meia-noite (marcar presença à 1h cai no dia certo) */
 function dayOf(t){ var d=new Date(t); if(d.getHours()<6) d.setDate(d.getDate()-1); return iso(d); }
 function today(){ return dayOf(Date.now()); }
+/* quem está escalado conta como quem trabalhou, a partir do próprio dia (hoje ou antes).
+   Quem não veio é tirado da escala. Dia futuro ainda não conta. */
+function counts(e){ return e.date<=today(); }
+/* versões antigas tinham "Veio"/"Faltou": falta some (não valia dinheiro) e o resto vira escalado */
+function normalizeDb(r){
+  r.entries=r.entries.filter(function(e){ return e.status!=="falta"; });
+  r.entries.forEach(function(e){ e.status="escalado"; });
+  return r;
+}
 function addDays(s,n){ var d=fromIso(s); d.setDate(d.getDate()+n); return iso(d); }
 var WD=["dom","seg","ter","qua","qui","sex","sáb"];
 var WDL=["domingo","segunda-feira","terça-feira","quarta-feira","quinta-feira","sexta-feira","sábado"];
@@ -669,8 +671,7 @@ var ui = {
   sumAnchor: null, /* null = escolhe sozinho o período ao entrar na aba Resumo */
   sumMode: "quinzena",
   calOpen: false,
-  payAnchor: null, /* null = escolhe sozinho a quinzena ao entrar na aba */
-  payMarked: null  /* dias marcados agora em "Sem marcar presença" (seguem na lista até sair da aba) */
+  payAnchor: null  /* null = escolhe sozinho a quinzena ao entrar na aba */
 };
 /* o app pode ficar dias aberto na memória do celular: quando vira o dia,
    volta tudo para o dia novo (senão ela escala no dia de ontem sem perceber) */
@@ -678,7 +679,7 @@ function resetToToday(){
   var t=today(), d=fromIso(t);
   ui.day=t; ui.selDay=t; ui.sumAnchor=null;
   ui.calYear=d.getFullYear(); ui.calMonth=d.getMonth(); ui.calOpen=false;
-  ui.payAnchor=null; ui.payMarked=null;
+  ui.payAnchor=null;
 }
 try { var st=localStorage.getItem(KEY+".tab"); if(st) ui.tab=st; } catch(e){}
 try { var sm=localStorage.getItem(KEY+".sumMode"); if(sm==="semana"||sm==="quinzena") ui.sumMode=sm; } catch(e){}
@@ -714,12 +715,11 @@ function renderNav(){
   /* mostra brand só em tablet via CSS */
   if(window.innerWidth>=860) brand.hidden=false; else brand.hidden=true;
 
-  /* número na aba "A pagar": pessoas com algo para resolver agora (quinzena que já fechou
-     sem pagar, ou dia que passou sem marcar presença). O que é da quinzena em andamento
-     não conta, senão o número fica aceso o tempo todo e ela para de olhar. */
-  var td=today(), curQ=quinzena(td).start, need={};
+  /* número na aba "A pagar": pessoas com quinzena já fechada sem pagar. O que é da quinzena
+     em andamento não conta, senão o número fica aceso o tempo todo e ela para de olhar. */
+  var curQ=quinzena(today()).start, need={};
   db.entries.forEach(function(e){
-    if((e.status==="trabalhou"&&!e.paid&&e.date<curQ)||(e.status==="escalado"&&e.date<td)) need[e.personId]=true;
+    if(!e.paid&&e.date<curQ) need[e.personId]=true;
   });
   var pending=Object.keys(need).length;
   TABS.forEach(function(t){
@@ -733,7 +733,7 @@ function renderNav(){
 }
 function goTab(tab){
   /* cada visita a "A pagar" e ao Resumo recomeça na quinzena que precisa de atenção */
-  if(ui.tab!==tab){ ui.payAnchor=null; ui.payMarked=null; ui.sumAnchor=null; }
+  if(ui.tab!==tab){ ui.payAnchor=null; ui.sumAnchor=null; }
   ui.tab=tab; try{localStorage.setItem(KEY+".tab",tab);}catch(e){}
   render();
 }
@@ -754,19 +754,16 @@ function helpSections(){
   return [
     ["escala","Escala",[
       "Toque em **Escalar** e marque quem vai trabalhar no dia. Para outro dia, toque na data lá em cima e escolha no calendário.",
-      "Depois do turno, marque **Veio** ou **Faltou** em cada pessoa. Só quem tem **Veio** entra no pagamento. Dia que ainda não chegou não dá para marcar.",
-      "Depois da meia-noite, até as 6h, o app continua no dia do turno da noite. Assim dá para marcar a presença no fim do expediente.",
-      "Marcou errado? É só tocar no outro botão. Se o dia já foi pago (aparece **Pago**), desfaça o pagamento em **A pagar** antes.",
-      "Escalou a pessoa errada? Toque em **Editar escala** e desmarque. Quem já tem Veio ou Faltou não pode ser tirado.",
-      "No calendário, a bolinha mostra os dias com gente escalada. **Bolinha vermelha**: dia que já passou com alguém sem Veio ou Faltou."
+      "Quem está escalado já conta como quem trabalhou. Não precisa marcar nada depois.",
+      "Escalou a pessoa errada, ou ela não veio? Toque em **Tirar** na linha dela e confirme. Se o dia já foi pago (aparece **Pago**), desfaça o pagamento em **A pagar** antes.",
+      "Depois da meia-noite, até as 6h, o app continua no dia do turno da noite."
     ]],
     ["pagar","A pagar",[
-      "Mostra quanto cada pessoa tem a receber na quinzena: do dia 1 ao 15 e do dia 16 ao fim do mês. As setas trocam de quinzena.",
-      "Se aparecer **Sem marcar presença**, marque Veio ou Faltou ali mesmo. Quem fica sem marcar não entra na conta.",
+      "Mostra quanto cada pessoa tem a receber na quinzena: do dia 1 ao 15 e do dia 16 ao fim do mês. As setas trocam de quinzena. Dia que ainda não chegou não entra.",
       "**Copiar Pix** copia a chave da pessoa para você colar no app do banco.",
       "Depois de pagar no banco, toque em **Paguei**, confira os dias e toque em **Confirmar**. Pagou só uma parte? Desmarque os dias que ficaram faltando.",
       "Registrou um pagamento por engano? Em **Já pagos**, toque em **Desfazer** e confirme.",
-      "O número na aba **A pagar** mostra quantas pessoas têm algo para resolver: quinzena que já fechou sem pagar ou dia que passou sem marcar presença."
+      "O número na aba **A pagar** mostra quantas pessoas têm quinzena já fechada sem pagar."
     ]],
     ["resumo","Resumo",[
       "Manda para cada pessoa, pelo WhatsApp, os dias que ela trabalhou e o total. Abre na mesma quinzena de **A pagar** (a que tem gente para receber).",
@@ -859,13 +856,12 @@ function renderEscala(){
   var daysInMonth=new Date(ui.calYear,ui.calMonth+1,0).getDate();
   var t=today();
 
-  /* bolinha: dia com gente escalada; vermelha se o dia já passou e alguém ficou sem marcar */
-  var daysWithEntries={}, daysOpen={};
+  /* bolinha: dia com gente escalada */
+  var daysWithEntries={};
   db.entries.forEach(function(e){
     var d=fromIso(e.date);
     if(d.getMonth()===ui.calMonth&&d.getFullYear()===ui.calYear){
       daysWithEntries[e.date]=true;
-      if(e.status==="escalado"&&e.date<t) daysOpen[e.date]=true;
     }
   });
 
@@ -877,7 +873,6 @@ function renderEscala(){
     if(ds===t) cls+=" today";
     if(ds===ui.selDay) cls+=" sel";
     if(daysWithEntries[ds]) cls+=" has";
-    if(daysOpen[ds]) cls+=" open";
     (function(ds){
       cal.appendChild(h("button",{class:cls,type:"button",text:String(d),onclick:function(){
         ui.selDay=ds; ui.calOpen=false; render();
@@ -900,12 +895,9 @@ function renderDayPanel(main){
     return nameOf(a).localeCompare(nameOf(b),"pt-BR");
   });
 
-  /* a data já aparece no botão do calendário, aqui vai só a ação
-     (com gente no dia, a mesma lista serve para pôr e para tirar) */
+  /* a data já aparece no botão do calendário, aqui vai só a ação */
   var hdr=h("div",{style:"display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;"},
-    dayEntries.length>0
-      ? h("button",{class:"btn primary sm",type:"button",onclick:openAddToDay},icon("edit"),h("span",{text:"Editar escala"}))
-      : h("button",{class:"btn primary sm",type:"button",onclick:openAddToDay},icon("plus"),h("span",{text:"Escalar"}))
+    h("button",{class:"btn primary sm",type:"button",onclick:openAddToDay},icon("plus"),h("span",{text:"Escalar"}))
   );
   panel.appendChild(hdr);
 
@@ -926,63 +918,46 @@ function renderDayPanel(main){
           h("b",{text:pName}),
           pRole?h("span",{text:pRole+" · "+money(entry.value)}):h("span",{text:money(entry.value)})
         ),
-        renderPresence(entry)
+        renderRowAction(entry)
       );
       list.appendChild(flashIf(row,"entry:"+entry.id));
     });
     panel.appendChild(list);
 
     /* total do dia */
-    var trabList=dayEntries.filter(function(e){return e.status==="trabalhou";});
-    if(trabList.length>0){
-      var totalDia=trabList.reduce(function(s,e){return s+(+e.value||0);},0);
-      panel.appendChild(h("div",{style:"margin-top:10px;padding:10px 0;border-top:1px solid var(--line);font-weight:700;display:flex;justify-content:space-between;"},
-        h("span",{text:trabList.length+" trabalh"+(trabList.length===1?"ou":"aram")}),
-        h("span",{text:money(totalDia)})
-      ));
-    }
+    var totalDia=sumVal(dayEntries);
+    panel.appendChild(h("div",{style:"margin-top:10px;padding:10px 0;border-top:1px solid var(--line);font-weight:700;display:flex;justify-content:space-between;"},
+      h("span",{text:dayEntries.length+" escalado"+(dayEntries.length===1?"":"s")}),
+      h("span",{text:money(totalDia)})
+    ));
   }
   main.appendChild(panel);
 }
 
-function renderPresence(entry,onMark){
+/* ação da linha: "Tirar" da escala (pede um segundo toque); dia já pago fica travado */
+function renderRowAction(entry){
   var div=h("div",{class:"presence"});
-
-  /* dia já pago: trava. Trocar para "Faltou" tiraria o dia do "Já pago" sem deixar rastro;
-     para mudar, ela desfaz o pagamento em "A pagar" antes */
   if(entry.paid){
     div.appendChild(h("button",{type:"button",class:"paid-lock",onclick:function(){
-      toast("Esse dia já foi pago. Para mudar, desfaça o pagamento em \"A pagar\".");
+      toast("Esse dia já foi pago. Para tirar, desfaça o pagamento em \"A pagar\".");
     }},icon("check"),h("span",{text:"Pago"})));
     return div;
   }
-
-  /* dia que ainda não chegou: não marca (evita pagar adiantado por engano) */
-  function mark(status){
-    if(entry.date>today()){ toast("Esse dia ainda não chegou. Marque depois do turno."); return; }
-    if(onMark) onMark();
-    entry.status=status; commit();
-  }
-  var bVeio=h("button",{type:"button",text:"Veio",onclick:function(){ mark("trabalhou"); }});
-  var bFaltou=h("button",{type:"button",text:"Faltou",onclick:function(){ mark("falta"); }});
-  if(entry.date>today()){ bVeio.classList.add("later"); bFaltou.classList.add("later"); }
-  if(entry.status==="trabalhou") bVeio.classList.add("on-ok");
-  if(entry.status==="falta") bFaltou.classList.add("on-bad");
-  div.appendChild(bVeio);
-  div.appendChild(bFaltou);
+  div.appendChild(confirmBtn("Tirar","Tirar?","sm danger",function(){
+    /* procura pelo id e confere de novo: os dados podem ter mudado com a janela aberta */
+    db.entries=db.entries.filter(function(e){ return !(e.id===entry.id&&!e.paid); });
+    commit(firstName(nameOf(entry))+" saiu da escala.");
+  }));
   return div;
 }
 
-/* escala do dia: marcar põe na escala; desmarcar tira. Só dá para tirar quem ainda
-   está sem "Veio"/"Faltou" e sem pagamento: aí não se perde nada de dinheiro. */
+/* escalar: marca quem vai trabalhar no dia. Quem já está escalado aparece marcado e travado;
+   para tirar alguém, é o botão "Tirar" na linha da pessoa. */
 function openAddToDay(){
   var day=ui.selDay;
-  var byPerson={};
-  db.entries.forEach(function(e){
-    if(e.date===day) (byPerson[e.personId]=byPerson[e.personId]||[]).push(e);
-  });
-  /* ativos, mais quem já está neste dia (mesmo que tenha sido desativado depois) */
-  var list=db.people.filter(function(p){return p.active!==false||byPerson[p.id];})
+  var already={};
+  db.entries.forEach(function(e){ if(e.date===day) already[e.personId]=true; });
+  var list=db.people.filter(function(p){return p.active!==false;})
     .sort(function(a,b){return a.name.localeCompare(b.name,"pt-BR");});
   if(list.length===0){
     toast("Cadastre pessoas primeiro na aba Pessoas.");
@@ -991,31 +966,24 @@ function openAddToDay(){
 
   var checks=[];
   var body=h("div",{class:"form"});
-
   var pickList=h("div",{class:"pick-list"});
   list.forEach(function(p){
-    var mine=byPerson[p.id]||[];
-    var already=mine.length>0;
-    var done=mine.filter(function(e){return e.status!=="escalado"||e.paid;})[0];
-    var normal=(p.role?p.role+" · ":"")+money(already?mine[0].value:p.rate);
-    var sub=h("span",{text:done?(done.paid?"Pago":done.status==="trabalhou"?"Marcado: veio":"Marcado: faltou"):normal});
-    var cb=h("input",{type:"checkbox",checked:already,disabled:!!done,onchange:function(){
-      /* desmarcou quem já estava: mostra na hora que vai sair */
-      if(!already) return;
-      sub.textContent=cb.checked?normal:"Vai sair da escala";
-      sub.style.color=cb.checked?"":"var(--bad)";
-    }});
-    checks.push({person:p,cb:cb,already:already,entries:mine});
+    var has=!!already[p.id];
+    var cb=h("input",{type:"checkbox",checked:has,disabled:has});
+    checks.push({person:p,cb:cb,has:has});
     pickList.appendChild(h("label",{class:"pick"},
       cb,
-      h("div",{class:"person-info",style:"flex:1;"},h("b",{text:p.name}),sub)
+      h("div",{class:"person-info",style:"flex:1;"},
+        h("b",{text:p.name}),
+        h("span",{text:has?"Já está na escala":(p.role?p.role+" · ":"")+money(p.rate)})
+      )
     ));
   });
   body.appendChild(pickList);
   body.appendChild(h("button",{class:"btn primary block",type:"button",text:"Confirmar",onclick:function(){
-    var added=0, removed=0, out={};
+    var added=0;
     checks.forEach(function(c){
-      if(c.cb.checked&&!c.already){
+      if(c.cb.checked&&!c.has){
         var nid=uid(); flashLater("entry:"+nid);
         db.entries.push({
           id:nid, personId:c.person.id, date:day,
@@ -1023,24 +991,13 @@ function openAddToDay(){
           status:"escalado", paid:false, paidAt:null, createdAt:new Date().toISOString()
         });
         added++;
-      } else if(!c.cb.checked&&c.already&&!c.cb.disabled){
-        c.entries.forEach(function(e){ out[e.id]=true; });
-        removed++;
       }
     });
-    if(!added&&!removed){
-      toast(checks.some(function(c){return c.already;})?"Nada mudou.":"Selecione pelo menos uma pessoa.");
-      return;
-    }
-    /* procura pelo id e confere de novo: os dados podem ter mudado com a janela aberta */
-    db.entries=db.entries.filter(function(e){ return !(out[e.id]&&e.status==="escalado"&&!e.paid); });
-    var msg=[];
-    if(added) msg.push(added+" pessoa"+(added>1?"s":"")+" escalada"+(added>1?"s":""));
-    if(removed) msg.push(removed+(added?"":" pessoa"+(removed>1?"s":""))+" tirada"+(removed>1?"s":"")+" da escala");
-    closeSheet(); commit(msg.join(", ")+".");
+    if(!added){ toast("Selecione pelo menos uma pessoa."); return; }
+    closeSheet(); commit(added+" pessoa"+(added>1?"s":"")+" escalada"+(added>1?"s":"")+".");
   }}));
 
-  openSheet("Escala de "+ddmm(day),body);
+  openSheet("Escalar para "+ddmm(day),body);
 }
 
 /* ================== A PAGAR ================== */
@@ -1064,14 +1021,12 @@ function sortedIds(by){
 }
 function sumVal(list){ return list.reduce(function(s,e){return s+(+e.value||0);},0); }
 
-/* quinzena que precisa de atenção: a mais antiga com dia sem pagar ou sem marcar presença;
-   sem pendência, a atual. "A pagar" e Resumo abrem nela (o resumo que ela manda é o
+/* quinzena que precisa de atenção: a mais antiga com dia sem pagar; sem pendência, a atual. "A pagar" e Resumo abrem nela (o resumo que ela manda é o
    da quinzena que vai pagar, não o da que acabou de começar). */
 function pendingQuinzena(){
   var t=today();
   var oldest=db.entries.reduce(function(m,e){
-    var pend=(e.status==="trabalhou"&&!e.paid)||(e.status==="escalado"&&e.date<t);
-    return pend&&(!m||e.date<m)?e.date:m;
+    return counts(e)&&!e.paid&&(!m||e.date<m)?e.date:m;
   },null);
   return quinzena(oldest&&oldest<t?oldest:t);
 }
@@ -1080,11 +1035,8 @@ function renderPagar(){
   var main=$("#main"); main.textContent="";
   addChild(main,header("A pagar"));
 
-  var t=today();
-  var worked=db.entries.filter(function(e){return e.status==="trabalhou";});
+  var worked=db.entries.filter(counts);
   var pendingAll=worked.filter(function(e){return !e.paid;});
-  /* escalados em dia que já passou sem "Veio" nem "Faltou": ainda não entram na conta */
-  var openAll=db.entries.filter(function(e){return e.status==="escalado"&&e.date<t;});
 
   /* quinzena exibida: a escolhida, ou a que precisa de atenção (pendingQuinzena).
      Fica fixa enquanto ela estiver na aba, para a tela não pular no meio de um toque. */
@@ -1107,47 +1059,15 @@ function renderPagar(){
   ));
 
   /* aviso de pendência em quinzenas anteriores */
-  var beforePay=pendingAll.filter(function(e){return e.date<q.start;});
-  var beforeOpen=openAll.filter(function(e){return e.date<q.start;});
-  if(beforePay.length>0||beforeOpen.length>0){
-    var before=beforePay.concat(beforeOpen);
+  var before=pendingAll.filter(function(e){return e.date<q.start;});
+  if(before.length>0){
     var oldestQ=quinzena(before.reduce(function(m,e){return e.date<m?e.date:m;},before[0].date));
-    var parts=[];
-    if(beforePay.length>0) parts.push(money(sumVal(beforePay))+" sem pagar");
-    if(beforeOpen.length>0) parts.push(beforeOpen.length+" dia"+(beforeOpen.length>1?"s":"")+" sem marcar");
     main.appendChild(h("div",{class:"notice"},
-      h("span",{text:"Tem "+parts.join(" e ")+" de quinzena anterior."}),
+      h("span",{text:"Tem "+money(sumVal(before))+" sem pagar de quinzena anterior."}),
       h("button",{class:"btn sm",type:"button",text:"Ver",onclick:function(){
         ui.payAnchor=oldestQ.start; render();
       }})
     ));
-  }
-
-  /* sem marcar presença: resolve aqui mesmo, antes de pagar.
-     O que ela marcar continua na lista até sair da aba (a linha não some debaixo do dedo). */
-  if(!ui.payMarked||ui.payMarked.q!==q.start) ui.payMarked={q:q.start,ids:{}};
-  var marked=ui.payMarked.ids;
-  var qOpen=db.entries.filter(function(e){
-    return inQ(e,q)&&(marked[e.id]||(e.status==="escalado"&&e.date<t));
-  }).sort(function(a,b){
-    return a.date<b.date?-1:a.date>b.date?1:nameOf(a).localeCompare(nameOf(b),"pt-BR");
-  });
-  var stillOpen=qOpen.filter(function(e){return e.status==="escalado";}).length;
-  if(qOpen.length>0){
-    main.appendChild(h("div",{class:"section-title",style:"color:var(--warn);",text:"Sem marcar presença"}));
-    var olist=h("div",{style:"margin-bottom:14px;"});
-    qOpen.forEach(function(entry){
-      var pName=nameOf(entry);
-      olist.appendChild(h("div",{class:"person-row"},
-        h("span",{class:"avatar",text:initials(pName)}),
-        h("div",{class:"person-info"},
-          h("b",{text:pName}),
-          h("span",{text:WD[fromIso(entry.date).getDay()]+", "+ddmm(entry.date)+" · "+money(entry.value)})
-        ),
-        renderPresence(entry,function(){ marked[entry.id]=true; })
-      ));
-    });
-    main.appendChild(olist);
   }
 
   var qWorked=worked.filter(function(e){return inQ(e,q);});
@@ -1155,9 +1075,9 @@ function renderPagar(){
   var qPaid=qWorked.filter(function(e){return e.paid;});
 
   if(qWorked.length===0){
-    if(stillOpen===0) main.appendChild(h("div",{class:"empty"},
-      h("b",{text:"Ninguém trabalhou nesta quinzena"}),
-      h("span",{text:"Os dias marcados como \"Veio\" aparecem aqui."})
+    main.appendChild(h("div",{class:"empty"},
+      h("b",{text:"Ninguém para pagar nesta quinzena"}),
+      h("span",{text:"Quem você escala na aba Escala aparece aqui."})
     ));
     return;
   }
@@ -1173,9 +1093,9 @@ function renderPagar(){
     ),"total-paid")
   ));
 
-  /* pendentes ("Quinzena paga!" só quando não sobrou dia sem marcar) */
+  /* pendentes */
   if(qPending.length===0){
-    if(stillOpen===0) main.appendChild(h("div",{class:"empty",style:"padding:18px 16px;"},
+    main.appendChild(h("div",{class:"empty",style:"padding:18px 16px;"},
       h("b",{text:"Quinzena paga!"}),
       h("span",{text:"Todo mundo desta quinzena já recebeu."})
     ));
@@ -1264,7 +1184,7 @@ function openPaySheet(pName,entries){
     var now=new Date().toISOString();
     /* procura pelo id: os dados podem ter sido recarregados com a janela aberta */
     db.entries.forEach(function(e){
-      if(ids[e.id]&&e.status==="trabalhou"&&!e.paid){ e.paid=true; e.paidAt=now; }
+      if(ids[e.id]&&!e.paid){ e.paid=true; e.paidAt=now; }
     });
     flashLater("paid:"+entries[0].personId); flashLater("total-paid");
     closeSheet(); commit("Pagamento de "+firstName(pName)+" registrado!");
@@ -1358,7 +1278,7 @@ function renderResumo(){
 
   /* quem trabalhou no período */
   var periodEntries=db.entries.filter(function(e){
-    return e.date>=r.start&&e.date<=r.end&&e.status==="trabalhou";
+    return e.date>=r.start&&e.date<=r.end&&counts(e);
   });
 
   if(periodEntries.length===0){
@@ -1530,6 +1450,7 @@ function renderPessoas(){
       try {
         var data=JSON.parse(ev.target.result);
         if(!Array.isArray(data.people)||!Array.isArray(data.entries)) throw new Error("Formato inválido");
+        normalizeDb(data);
         /* mostra de quando é o backup e compara com o que está no celular: restaurar um
            backup velho sem perceber faz pagamentos voltarem para "a pagar" (e serem pagos de novo) */
         var when=data.settings&&data.settings.lastBackup, d=daysSince(when), dt=new Date(when);
@@ -1631,7 +1552,7 @@ function openPersonForm(existing){
          também para os dias ainda não pagos (os pagos ficam como foram pagos). */
       var applied=0;
       if(rate!==p.rate){
-        var open=db.entries.filter(function(e){return e.personId===p.id&&!e.paid&&e.status!=="falta"&&e.value!==rate;});
+        var open=db.entries.filter(function(e){return e.personId===p.id&&!e.paid&&e.value!==rate;});
         if(open.length&&confirm("Usar "+money(rate)+" também "+
             (open.length===1?"no dia que ainda não foi pago":"nos "+open.length+" dias que ainda não foram pagos")+
             "?\n\nOK: sim.\nCancelar: só nos próximos dias que você escalar.")){
