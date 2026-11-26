@@ -5,9 +5,9 @@
    Assim toda atualização publicada no GitHub chega na próxima vez que ela abrir com internet.
    Fontes do Google: cache primeiro (não mudam); sem cópia e com rede lenta, abre com a fonte
    do celular em vez de ficar esperando. */
-var CACHE = "boteco-dida-v4";
+var CACHE = "boteco-dida-v5";
 var PRAZO = 3000;
-var ASSETS = ["./", "./index.html", "./manifest.json",
+var ASSETS = ["./", "./index.html", "./firebase-config.js", "./manifest.json",
   "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png",
   "./icon-maskable-192.png", "./icon-maskable-512.png"];
 
@@ -88,6 +88,17 @@ self.addEventListener("fetch", function(e) {
         });
       })
     );
+    return;
+  }
+
+  // Programa da nuvem (versão fixa): cópia guardada primeiro, para abrir sem internet
+  if (url.indexOf("https://www.gstatic.com/firebasejs/") === 0) {
+    e.respondWith(caches.match(req).then(function(hit) {
+      if (hit) return hit;
+      var f = fetchAndKeep(req);
+      e.waitUntil(f.saved);
+      return f.response;
+    }));
     return;
   }
 

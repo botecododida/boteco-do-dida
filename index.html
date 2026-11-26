@@ -403,6 +403,7 @@ button.chip:hover { background: var(--surface-2); }
 </div>
 <div id="overlay"></div>
 
+<script src="firebase-config.js"></script>
 <script>
 (function(){
 "use strict";
@@ -459,8 +460,9 @@ function persist(){
       toast("O app estava aberto em outra janela. Confira e faça de novo.");
       return false;
     }
-    var s=JSON.stringify(db);
-    localStorage.setItem(KEY,s); savedJson=s; return true;
+    var s=JSON.stringify(db), before=savedJson;
+    localStorage.setItem(KEY,s); savedJson=s;
+    cloudQueue(before,db); return true;
   }
   catch(e){ toast("Sem espaço para salvar. Libere espaço no aparelho."); return false; }
 }
@@ -762,21 +764,28 @@ function helpSections(){
       "Mostra quanto cada pessoa tem a receber na quinzena: do dia 1 ao 15 e do dia 16 ao fim do mês. As setas trocam de quinzena. Dia que ainda não chegou não entra.",
       "**Copiar Pix** copia a chave da pessoa para você colar no app do banco.",
       "Depois de pagar no banco, toque em **Paguei**, confira os dias e toque em **Confirmar**. Pagou só uma parte? Desmarque os dias que ficaram faltando.",
+      "Em **Já pagos**, o botão **Holerite** gera o recibo em PDF para a pessoa assinar.",
       "Registrou um pagamento por engano? Em **Já pagos**, toque em **Desfazer** e confirme.",
       "O número na aba **A pagar** mostra quantas pessoas têm quinzena já fechada sem pagar."
     ]],
     ["resumo","Resumo",[
       "Manda para cada pessoa, pelo WhatsApp, os dias que ela trabalhou e o total. Abre na mesma quinzena de **A pagar** (a que tem gente para receber).",
       "Toque no botão verde, mande a mensagem no WhatsApp e volte para o app: o botão já mostra a próxima pessoa.",
-      "O botão só aparece para quem tem WhatsApp cadastrado com DDD."
+      "O botão só aparece para quem tem WhatsApp cadastrado com DDD.",
+      "No modo **Quinzena**, toque em **Holerite (PDF)** para gerar o de uma pessoa, ou em **Holerites de todos (PDF)**. Dá para mandar pelo WhatsApp, imprimir ou salvar."
     ]],
     ["pessoas","Pessoas",[
       "Toque em **Nova pessoa** e preencha nome, WhatsApp com DDD, valor da diária e chave Pix.",
       "Para mudar a diária, toque em **Editar** na pessoa. O app pergunta se o valor novo vale também para os dias que ainda não foram pagos.",
       "Alguém parou de trabalhar? Toque em **Desativar**. A pessoa sai da lista de escalar, mas o histórico e o que ela tem a receber continuam."
     ]],
+    ["nuvem","Vários celulares",[
+      "Em **Pessoas**, toque em **Conectar este celular** e use o mesmo e-mail e senha em todos.",
+      "Conecte **primeiro** o celular que já tem os dados. O que mudar em um aparece nos outros, com internet."
+    ]],
     ["backup","Backup",[
-      "Os dados ficam só neste celular. Se ele quebrar, for roubado ou trocado, só o backup salva.",
+      linkedUid()?"Os dados ficam neste celular e na nuvem. O backup é uma cópia extra de segurança."
+        :"Os dados ficam só neste celular. Se ele quebrar, for roubado ou trocado, só o backup salva.",
       canShareFiles
         ? "Quando aparecer o aviso de backup, toque em **Salvar no WhatsApp** e mande o arquivo para o seu próprio número."
         : "Quando aparecer o aviso de backup, toque em **Baixar backup** e guarde o arquivo fora deste aparelho.",
@@ -984,7 +993,7 @@ function openAddToDay(){
     var added=0;
     checks.forEach(function(c){
       if(c.cb.checked&&!c.has){
-        var nid=uid(); flashLater("entry:"+nid);
+        var nid=day+"_"+c.person.id; flashLater("entry:"+nid);
         db.entries.push({
           id:nid, personId:c.person.id, date:day,
           role:c.person.role, value:c.person.rate,
@@ -1153,6 +1162,10 @@ function renderPagar(){
         info.entries.forEach(function(e){e.paid=false;e.paidAt=null;});
         commit("Pagamento de "+firstName(pName)+" desfeito.");
       }));
+      actions.appendChild(h("button",{class:"btn sm",type:"button",onclick:function(){
+        /* o holerite leva a quinzena inteira da pessoa, inclusive o que ainda falta */
+        emitPayslips([pid],groupByPerson(qWorked),q);
+      }},icon("down"),h("span",{text:"Holerite"})));
       row.appendChild(actions);
       plist.appendChild(row);
     });
@@ -1328,6 +1341,12 @@ function renderResumo(){
     main.appendChild(fila);
   }
 
+  if(ui.sumMode==="quinzena"){
+    main.appendChild(h("button",{class:"btn primary block",type:"button",style:"margin-bottom:10px;",
+      onclick:function(){ emitPayslips(ordem,byPerson,r); }},
+      icon("down"),h("span",{text:"Holerites de todos (PDF)"})));
+  }
+
   ordem.forEach(function(pid){
     var info=byPerson[pid];
     var p=person(pid);
@@ -1364,6 +1383,12 @@ function renderResumo(){
       card.appendChild(h("div",{class:"detail",text:"Sem WhatsApp com DDD no cadastro."}));
     }
 
+    if(ui.sumMode==="quinzena"){
+      card.appendChild(h("div",{class:"actions"},
+        h("button",{class:"btn sm",type:"button",onclick:function(){ emitPayslips([pid],byPerson,r); }},
+          icon("down"),h("span",{text:"Holerite (PDF)"}))));
+    }
+
     main.appendChild(card);
   });
 }
@@ -1383,6 +1408,363 @@ function buildSummaryMsg(p,info,r){
   lines.push(BAR.nome);
   lines.push("CNPJ "+BAR.cnpj);
   return lines.join("\n");
+}
+
+/* ================== SINCRONIZAR CELULARES (Firebase) ================== */
+/* O celular continua guardando tudo nele (funciona sem internet). Cada alteração entra numa
+   fila que é enviada para a nuvem; o que chega da nuvem atualiza a tela na hora.
+   A configuração fica no arquivo firebase-config.js. */
+var FB_VER="10.12.2", FB_URL="https://www.gstatic.com/firebasejs/"+FB_VER+"/";
+var LINK_KEY=KEY+".nuvem", QUEUE_KEY=KEY+".fila";
+var cloud={ cfg:window.FIREBASE_CONFIG||null, fs:null, au:null, store:null, auth:null,
+  user:null, ready:false, loading:false, error:"", snap:{}, stops:[], sending:{}, linking:false };
+
+function linkedUid(){ try{ return localStorage.getItem(LINK_KEY); }catch(e){ return null; } }
+function readQueue(){ try{ return JSON.parse(localStorage.getItem(QUEUE_KEY)||"[]"); }catch(e){ return []; } }
+function writeQueue(q){ localStorage.setItem(QUEUE_KEY,JSON.stringify(q)); }
+
+/* compara o antes e o depois e transforma em alterações pequenas, registro por registro:
+   assim dois celulares mexendo em coisas diferentes não apagam o trabalho um do outro */
+function diffDb(a,b){
+  var ops=[];
+  ["people","entries"].forEach(function(c){
+    var old={};
+    (a[c]||[]).forEach(function(x){ old[x.id]=x; });
+    (b[c]||[]).forEach(function(x){
+      var o=old[x.id]; delete old[x.id];
+      if(!o){
+        var d=Object.assign({},x);
+        /* dia novo não leva "não pago": nunca desfaz um pagamento feito em outro celular */
+        if(c==="entries"&&!d.paid){ delete d.paid; delete d.paidAt; }
+        ops.push({c:c,id:x.id,t:"set",d:d}); return;
+      }
+      var ch={}, n=0;
+      Object.keys(x).forEach(function(k){
+        if(JSON.stringify(x[k])!==JSON.stringify(o[k])){ ch[k]=x[k]===undefined?null:x[k]; n++; }
+      });
+      if(n) ops.push({c:c,id:x.id,t:"upd",d:ch});
+    });
+    Object.keys(old).forEach(function(id){ ops.push({c:c,id:id,t:"del"}); });
+  });
+  if(JSON.stringify(a.functions||[])!==JSON.stringify(b.functions||[]))
+    ops.push({c:"config",id:"geral",t:"set",d:{functions:b.functions||[]}});
+  return ops;
+}
+function addToQueue(ops){
+  var q=readQueue();
+  ops.forEach(function(o){ o.n=uid(); q.push(o); });
+  writeQueue(q);
+}
+function cloudQueue(beforeJson,after){
+  if(!linkedUid()) return;
+  var before=null;
+  try{ before=JSON.parse(beforeJson||"null"); }catch(e){}
+  var ops=diffDb(before||emptyDb(),after);
+  if(!ops.length) return;
+  addToQueue(ops); cloudFlush();
+}
+function cloudFlush(){
+  if(!cloud.ready||!cloud.user||linkedUid()!==cloud.user.uid) return;
+  var f=cloud.fs;
+  readQueue().forEach(function(op){
+    if(cloud.sending[op.n]) return;
+    cloud.sending[op.n]=true;
+    var ref=f.doc(cloud.store,op.c,op.id);
+    var p=op.t==="del"?f.deleteDoc(ref):op.t==="upd"?f.updateDoc(ref,op.d):f.setDoc(ref,op.d,{merge:true});
+    p.then(function(){ done(); },function(err){
+      /* alterar algo que outro celular já tirou: não há o que enviar */
+      if(err&&err.code==="not-found") return done();
+      delete cloud.sending[op.n];
+      cloud.error="A nuvem recusou o envio. Confira as regras do Firebase."; cloudRefresh();
+    });
+    function done(){
+      writeQueue(readQueue().filter(function(x){ return x.n!==op.n; }));
+      delete cloud.sending[op.n]; cloudRefresh();
+    }
+  });
+}
+/* dados da nuvem + o que ainda está na fila deste celular */
+function cloudData(){
+  var out={};
+  ["people","entries"].forEach(function(c){
+    var m={};
+    cloud.snap[c].forEach(function(x){ m[x.id]=Object.assign({},x.data,{id:x.id}); });
+    out[c]=m;
+  });
+  var cfg=cloud.snap.config.filter(function(x){ return x.id==="geral"; })[0];
+  out.functions=cfg&&cfg.data.functions||[];
+  readQueue().forEach(function(op){
+    if(op.c==="config"){ out.functions=op.d.functions; return; }
+    var m=out[op.c];
+    if(op.t==="del") delete m[op.id];
+    else if(op.t==="set") m[op.id]=Object.assign({},m[op.id],op.d);
+    else if(m[op.id]) m[op.id]=Object.assign({},m[op.id],op.d);
+  });
+  function list(m){
+    return Object.keys(m).map(function(k){ return m[k]; }).sort(function(a,b){
+      return String(a.createdAt||"").localeCompare(String(b.createdAt||""));
+    });
+  }
+  var entries=list(out.entries);
+  entries.forEach(function(e){ e.paid=!!e.paid; e.paidAt=e.paidAt||null; });
+  return normalizeDb({people:list(out.people),entries:entries,functions:out.functions.slice()});
+}
+function snapshotsReady(){ return !!(cloud.snap.people&&cloud.snap.entries&&cloud.snap.config); }
+function cloudApply(){
+  if(!snapshotsReady()||!cloud.user) return;
+  if(!linkedUid()){ cloudLink(); return; }
+  if(linkedUid()!==cloud.user.uid||dbLocked) return;
+  syncDb();
+  var data=cloudData();
+  var next={people:data.people,entries:data.entries,functions:data.functions,settings:db.settings};
+  var s=JSON.stringify(next);
+  if(s!==JSON.stringify(db)){
+    try{ localStorage.setItem(KEY,s); savedJson=s; }catch(e){ toast("Sem espaço para salvar. Libere espaço no aparelho."); return; }
+    db=next; render();
+  }
+  cloudFlush();
+}
+/* primeira conexão deste celular */
+function cloudLink(){
+  if(cloud.linking) return;
+  cloud.linking=true;
+  syncDb();
+  var cloudEmpty=!cloud.snap.people.length&&!cloud.snap.entries.length;
+  var localHas=db.people.length||db.entries.length;
+  if(!cloudEmpty&&localHas){
+    if(!confirm("A nuvem já tem dados ("+cloud.snap.people.length+" pessoas).\n\n"+
+        "Os dados DESTE celular ("+db.people.length+" pessoas) serão trocados pelos da nuvem.\n\nContinuar?")){
+      cloud.linking=false; cloudLogout(); return;
+    }
+  }
+  try{
+    if(!cloudEmpty&&localHas) localStorage.setItem(KEY+".antes-da-nuvem",JSON.stringify(db));
+    writeQueue(cloudEmpty?diffDb(emptyDb(),db).map(function(o){ o.n=uid(); return o; }):[]);
+    localStorage.setItem(LINK_KEY,cloud.user.uid);
+  }catch(e){ cloud.linking=false; toast("Sem espaço para salvar. Libere espaço no aparelho."); return; }
+  cloud.linking=false;
+  cloudApply(); render(); toast("Celular conectado!");
+}
+function stopListening(){ cloud.stops.forEach(function(f){ f(); }); cloud.stops=[]; cloud.snap={}; }
+function startListening(){
+  stopListening();
+  ["people","entries","config"].forEach(function(c){
+    cloud.stops.push(cloud.fs.onSnapshot(cloud.fs.collection(cloud.store,c),{includeMetadataChanges:true},function(q){
+      /* só vale o que veio do servidor: uma cópia vazia sem internet não apaga nada */
+      if(q.metadata.fromCache) return;
+      cloud.error="";
+      cloud.snap[c]=q.docs.map(function(d){ return {id:d.id,data:d.data()}; });
+      cloudApply(); cloudRefresh();
+    },function(){
+      cloud.error="Sem permissão para ler a nuvem. Confira o e-mail e as regras do Firebase."; cloudRefresh();
+    }));
+  });
+}
+function cloudStart(){
+  if(!cloud.cfg||cloud.ready||cloud.loading) return;
+  cloud.loading=true;
+  Promise.all([import(FB_URL+"firebase-app.js"),import(FB_URL+"firebase-auth.js"),import(FB_URL+"firebase-firestore.js")])
+  .then(function(m){
+    var app=m[0].initializeApp(cloud.cfg);
+    cloud.au=m[1]; cloud.fs=m[2];
+    cloud.auth=cloud.au.getAuth(app); cloud.store=cloud.fs.getFirestore(app);
+    cloud.ready=true; cloud.loading=false; cloud.error="";
+    cloud.au.onAuthStateChanged(cloud.auth,function(user){
+      cloud.user=user; cloud.sending={};
+      if(user) startListening(); else stopListening();
+      cloudRefresh();
+    });
+  }).catch(function(){ cloud.loading=false; cloudRefresh(); });
+}
+function cloudLogout(){
+  try{ localStorage.removeItem(LINK_KEY); localStorage.removeItem(QUEUE_KEY); }catch(e){}
+  stopListening(); cloud.sending={};
+  if(cloud.ready) cloud.au.signOut(cloud.auth);
+  render();
+}
+function cloudStatus(){
+  if(cloud.error) return cloud.error;
+  if(!linkedUid()) return cloud.user?"Conectando...":"Este celular não está conectado.";
+  var n=readQueue().length;
+  if(!navigator.onLine) return "Sem internet. "+(n?n+" alteração(ões) serão enviadas quando voltar.":"Atualiza quando a internet voltar.");
+  if(cloud.ready&&!cloud.user) return "Entre de novo para continuar sincronizando.";
+  if(n) return "Enviando "+n+" alteração(ões)...";
+  return snapshotsReady()?"Conectado. Os celulares estão sincronizados.":"Conectando...";
+}
+function cloudRefresh(){
+  var el=document.getElementById("cloud-status");
+  if(!el) return;
+  if(ui.tab==="pessoas"&&!document.querySelector(".scrim")) render(); else el.textContent=cloudStatus();
+}
+function renderCloud(main){
+  addChild(main,h("p",{class:"section-title",text:"Sincronizar celulares",style:"margin-top:28px;"}));
+  var box=h("div",{style:"display:flex;flex-direction:column;gap:8px;"});
+  if(!cloud.cfg){
+    box.appendChild(h("p",{class:"note",text:"A sincronização ainda não foi configurada (arquivo firebase-config.js)."}));
+  } else {
+    box.appendChild(h("p",{class:"note",id:"cloud-status",role:"status",text:cloudStatus()}));
+    if(!cloud.user){
+      box.appendChild(h("button",{class:"btn primary block",type:"button",text:"Conectar este celular",onclick:openLogin}));
+    } else {
+      box.appendChild(h("p",{class:"note",text:cloud.user.email||""}));
+      box.appendChild(confirmBtn("Desconectar este celular",
+        readQueue().length?"Há alterações não enviadas. Sair?":"Confirmar?","danger block",cloudLogout));
+    }
+  }
+  main.appendChild(box);
+}
+function openLogin(){
+  if(!cloud.ready){ cloudStart(); toast("Sem conexão com a nuvem. Confira a internet e tente de novo."); return; }
+  var iMail=h("input",{type:"email",autocomplete:"username"});
+  var iPass=h("input",{type:"password",autocomplete:"current-password"});
+  var btn=h("button",{class:"btn primary block",type:"button",text:"Entrar",onclick:function(){
+    btn.disabled=true;
+    cloud.au.signInWithEmailAndPassword(cloud.auth,iMail.value.trim(),iPass.value).then(closeSheet,function(){
+      btn.disabled=false; toast("Não entrou. Confira e-mail, senha e internet.");
+    });
+  }});
+  openSheet("Conectar celular",h("div",{class:"form"},
+    h("p",{class:"note",text:"Use o mesmo e-mail e senha em todos os celulares."}),
+    h("div",{class:"field"},h("label",{text:"E-mail"}),iMail),
+    h("div",{class:"field"},h("label",{text:"Senha"}),iPass),
+    btn));
+}
+window.addEventListener("online",function(){ cloudStart(); cloudFlush(); cloudRefresh(); });
+window.addEventListener("offline",cloudRefresh);
+
+/* ================== HOLERITE (PDF) ================== */
+function ddmmaaaa(s){ return ddmm(s)+"/"+s.slice(0,4); }
+/* valor por extenso, até 999.999,99 */
+function extenso(v){
+  var U=["","um","dois","três","quatro","cinco","seis","sete","oito","nove","dez","onze","doze","treze","quatorze","quinze","dezesseis","dezessete","dezoito","dezenove"];
+  var D=["","","vinte","trinta","quarenta","cinquenta","sessenta","setenta","oitenta","noventa"];
+  var C=["","cento","duzentos","trezentos","quatrocentos","quinhentos","seiscentos","setecentos","oitocentos","novecentos"];
+  function tres(n){
+    if(n===100) return "cem";
+    var p=[], r=n%100;
+    if(n>=100) p.push(C[Math.floor(n/100)]);
+    if(r){ if(r<20) p.push(U[r]); else { p.push(D[Math.floor(r/10)]); if(r%10) p.push(U[r%10]); } }
+    return p.join(" e ");
+  }
+  var cents=Math.round(v*100), i=Math.floor(cents/100), c=cents%100, out=[];
+  if(i){
+    var mil=Math.floor(i/1000), resto=i%1000, t="";
+    if(mil) t=mil===1?"mil":tres(mil)+" mil";
+    if(resto) t+=(t?(resto<100||resto%100===0?" e ":" "):"")+tres(resto);
+    out.push(t+(i===1?" real":" reais"));
+  }
+  if(c) out.push(tres(c)+(c===1?" centavo":" centavos"));
+  return out.join(" e ")||"zero reais";
+}
+/* gerador de PDF simples (A4, fonte Helvetica), sem depender de internet */
+function pdfEsc(s){
+  return String(s).replace(/—|–/g,"-").replace(/[^\x20-\xff]/g,"?").replace(/[\\()]/g,"\\$&");
+}
+function textWidth(s,size){
+  var w=0;
+  for(var i=0;i<s.length;i++){
+    var c=s.charAt(i);
+    w+=/[0-9$]/.test(c)?556:/[ ., \/]/.test(c)?278:c==="R"?722:556;
+  }
+  return w*size/1000;
+}
+function wrapText(s,max){
+  var out=[], line="";
+  s.split(" ").forEach(function(w){
+    if(line&&(line+" "+w).length>max){ out.push(line); line=w; } else line=line?line+" "+w:w;
+  });
+  if(line) out.push(line);
+  return out;
+}
+function payslipPage(pid,entries,q){
+  var p=person(pid)||{name:"Removido"}, o=[];
+  function text(x,y,s,size,bold){ o.push("BT /F"+(bold?2:1)+" "+size+" Tf "+x+" "+y+" Td ("+pdfEsc(s)+") Tj ET"); }
+  function right(y,s,size,bold){ text((545-textWidth(s,size)*(bold?1.04:1)).toFixed(1),y,s,size,bold); }
+  function line(y){ o.push("0.6 w 50 "+y+" m 545 "+y+" l S"); }
+  var total=sumVal(entries);
+  var paid=entries.filter(function(e){return e.paid;}), paidSum=sumVal(paid);
+  text(50,790,BAR.nome,18,true);
+  text(50,773,"CNPJ "+BAR.cnpj,10);
+  line(760);
+  text(50,738,"HOLERITE QUINZENAL - RECIBO DE PAGAMENTO",13,true);
+  text(50,718,"Período: "+ddmmaaaa(q.start)+" a "+ddmmaaaa(q.end)+" ("+q.label+")",10);
+  text(50,696,"Nome: "+p.name,11,true);
+  text(50,680,"Função: "+(p.role||"Não informada"),10);
+  line(666);
+  text(50,650,"Data",10,true); text(160,650,"Descrição",10,true); right(650,"Valor",10,true);
+  line(642);
+  var y=626;
+  entries.slice().sort(function(a,b){return a.date<b.date?-1:1;}).forEach(function(e){
+    text(50,y,ddmmaaaa(e.date),10);
+    text(160,y,"Diária - "+WDL[fromIso(e.date).getDay()]+(e.role?" ("+e.role+")":""),10);
+    right(y,money(e.value),10);
+    y-=17;
+  });
+  line(y+6); y-=14;
+  text(50,y,"Total ("+entries.length+(entries.length===1?" diária)":" diárias)"),12,true);
+  right(y,money(total),12,true); y-=20;
+  var allPaid=paid.length===entries.length;
+  if(!allPaid){
+    text(50,y,"Já pago",10); right(y,money(paidSum),10); y-=16;
+    text(50,y,"Falta pagar",10,true); right(y,money(total-paidSum),10,true); y-=20;
+  } else {
+    var last=paid.reduce(function(m,e){return e.paidAt&&e.paidAt>m?e.paidAt:m;},"");
+    if(last){ text(50,y,"Pago em "+ddmmaaaa(iso(new Date(last))),10); y-=20; }
+  }
+  if(q.end>today()){ text(50,y,"Atenção: quinzena ainda em andamento (valores parciais).",10,true); y-=20; }
+  y-=10;
+  /* só vira recibo (com assinatura) quando tudo está pago */
+  if(!allPaid){
+    text(50,y,"Pagamento pendente. Este documento não vale como recibo.",11,true);
+    return o.join("\n");
+  }
+  wrapText("Declaro que recebi de "+BAR.nome+" a quantia de "+money(total)+" ("+extenso(total)+
+    "), referente às diárias listadas acima.",88).forEach(function(l){ text(50,y,l,11); y-=16; });
+  y-=34;
+  text(50,y,"Data: ____/____/________",11); y-=50;
+  line(y); text(50,y-14,p.name,10); text(50,y-28,"Assinatura de quem recebeu",9);
+  return o.join("\n");
+}
+function buildPdf(pages){
+  var objs=["<< /Type /Catalog /Pages 2 0 R >>",null,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>"], kids=[];
+  pages.forEach(function(c){
+    var n=objs.length+1; kids.push(n+" 0 R");
+    objs.push("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents "+(n+1)+" 0 R >>");
+    objs.push("<< /Length "+c.length+" >>\nstream\n"+c+"\nendstream");
+  });
+  objs[1]="<< /Type /Pages /Kids ["+kids.join(" ")+"] /Count "+kids.length+" >>";
+  var out="%PDF-1.4\n", pos=[];
+  objs.forEach(function(b,i){ pos.push(out.length); out+=(i+1)+" 0 obj\n"+b+"\nendobj\n"; });
+  var x=out.length;
+  out+="xref\n0 "+(objs.length+1)+"\n0000000000 65535 f \n";
+  pos.forEach(function(p){ out+=("000000000"+p).slice(-10)+" 00000 n \n"; });
+  out+="trailer\n<< /Size "+(objs.length+1)+" /Root 1 0 R >>\nstartxref\n"+x+"\n%%EOF";
+  var bytes=new Uint8Array(out.length);
+  for(var i=0;i<out.length;i++) bytes[i]=out.charCodeAt(i)&255;
+  return bytes;
+}
+function slug(s){
+  return String(s).normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
+}
+/* abre o compartilhar do celular (WhatsApp, imprimir, salvar); sem isso, baixa o PDF */
+function emitPayslips(ids,byPerson,r){
+  var q=quinzena(r.start);
+  var pages=ids.map(function(pid){ return payslipPage(pid,byPerson[pid].entries,q); });
+  var who=ids.length===1?slug(nameOf({personId:ids[0]})):"todos";
+  var file=new File([buildPdf(pages)],"holerite-"+who+"-"+q.start+".pdf",{type:"application/pdf"});
+  function download(){
+    var url=URL.createObjectURL(file);
+    var a=h("a",{href:url,download:file.name});
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){URL.revokeObjectURL(url);},60000);
+    toast("Holerite baixado.");
+  }
+  var can=false;
+  try{ can=!!(navigator.canShare&&navigator.canShare({files:[file]})); }catch(e){}
+  if(!can){ download(); return; }
+  navigator.share({files:[file]}).catch(function(err){ if(!err||err.name!=="AbortError") download(); });
 }
 
 /* ================== PESSOAS ================== */
@@ -1431,6 +1813,8 @@ function renderPessoas(){
     inactive.forEach(function(p){ main.appendChild(renderPersonCard(p)); });
   }
 
+  renderCloud(main);
+
   /* backup/restore */
   addChild(main,h("p",{class:"section-title",text:"Dados",style:"margin-top:28px;"}));
   var dataDiv=h("div",{style:"display:flex;flex-direction:column;gap:8px;"});
@@ -1458,7 +1842,8 @@ function renderPessoas(){
         function what(o){ return nOf(o.people.length,"pessoa","pessoas")+" e "+nOf(o.entries.length,"dia registrado","dias registrados"); }
         if(!confirm((d===null?"Backup sem data.":"Backup de "+pad(dt.getDate())+"/"+pad(dt.getMonth()+1)+"/"+dt.getFullYear()+" ("+agoText(d)+").")+
           "\n\nNo backup: "+what(data)+".\nNeste celular agora: "+what(db)+"."+
-          "\n\nRestaurar apaga o que está neste celular e coloca o backup no lugar. Continuar?")) return;
+          "\n\nRestaurar apaga o que está neste celular e coloca o backup no lugar."+
+          (linkedUid()?" Vale para TODOS os celulares conectados.":"")+" Continuar?")) return;
         db.people=data.people;
         db.entries=data.entries;
         db.functions=Array.isArray(data.functions)?data.functions:[];
@@ -1677,6 +2062,7 @@ function render(){
 }
 
 render();
+cloudStart();
 
 /* outra janela do app salvou: mostra os dados novos aqui também */
 window.addEventListener("storage",function(e){
