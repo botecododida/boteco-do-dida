@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Sua escala · Boteco do Dida</title>
+<style>
+  body{margin:0;background:#1f3b33;color:#18221e;font:18px/1.4 system-ui,sans-serif;padding:24px 16px;}
+  main{max-width:420px;margin:0 auto;background:#fff;border-radius:18px;padding:22px;text-align:center;}
+  img{width:96px;height:96px;border-radius:50%;}
+  h1{font-size:22px;margin:12px 0 4px;}
+  ul{list-style:none;padding:0;margin:18px 0;text-align:left;}
+  li{background:#f1f3ef;border-left:5px solid #e3a72a;border-radius:8px;padding:10px 12px;margin-bottom:8px;}
+  button{width:100%;border:0;border-radius:12px;background:#1f7a45;color:#fff;font:700 19px system-ui,sans-serif;padding:16px;}
+  button:disabled{opacity:.7;}
+  #msg{font-weight:700;min-height:1.4em;}
+</style>
+</head>
+<body>
+<main>
+  <img src="icon-192.png" alt="Boteco do Dida">
+  <h1 id="title">Sua escala</h1>
+  <div id="period"></div>
+  <ul id="days"></ul>
+  <button id="ok" type="button" hidden>OK, recebi minha escala</button>
+  <p id="msg" role="status"></p>
+</main>
+<script src="firebase-config.js"></script>
+<script>
+(function(){
+  var $=function(id){ return document.getElementById(id); };
+  var WD=["domingo","segunda-feira","terça-feira","quarta-feira","quinta-feira","sexta-feira","sábado"];
+  function date(s){ var p=s.split("-"); return new Date(+p[0],+p[1]-1,+p[2]); }
+  function ddmm(d){ return ("0"+d.getDate()).slice(-2)+"/"+("0"+(d.getMonth()+1)).slice(-2); }
+  var data;
+  try{
+    var b=location.hash.slice(1).replace(/-/g,"+").replace(/_/g,"/");
+    data=JSON.parse(decodeURIComponent(escape(atob(b))));
+    if(!/^[0-9a-f]{32}$/.test(data.t)||!data.d.length) throw 0;
+    var start=date(data.s), end=date(data.s); end.setDate(end.getDate()+6);
+    $("title").textContent="Oi, "+data.n+"! Sua escala";
+    $("period").textContent="Semana de "+ddmm(start)+" a "+ddmm(end);
+    data.d.forEach(function(x){
+      var d=date(x[0]), li=document.createElement("li"), name=WD[d.getDay()];
+      li.textContent=name.charAt(0).toUpperCase()+name.slice(1)+", "+ddmm(d)+(x[1]?" · "+x[1]:"");
+      $("days").appendChild(li);
+    });
+  }catch(e){ $("msg").textContent="Link incompleto. Peça a escala de novo."; return; }
+  var key="botecoDida.ok."+data.t;
+  function done(){ $("ok").hidden=true; $("msg").textContent="✅ Confirmado! O Boteco do Dida já recebeu o seu OK."; }
+  try{ if(localStorage.getItem(key)){ done(); return; } }catch(e){}
+  var cfg=window.FIREBASE_CONFIG;
+  if(!cfg){ $("msg").textContent="Confirmação indisponível. Responda no WhatsApp."; return; }
+  $("ok").hidden=false;
+  $("ok").onclick=function(){
+    $("ok").disabled=true; $("msg").textContent="Enviando...";
+    fetch("https://firestore.googleapis.com/v1/projects/"+encodeURIComponent(cfg.projectId)+
+      "/databases/(default)/documents/confirms?documentId="+data.t+"&key="+encodeURIComponent(cfg.apiKey),
+      {method:"POST",headers:{"Content-Type":"application/json"},
+       body:JSON.stringify({fields:{at:{stringValue:new Date().toISOString()}}})})
+    .then(function(r){
+      /* 409: este OK já tinha sido registrado */
+      if(!r.ok&&r.status!==409) throw 0;
+      try{ localStorage.setItem(key,"1"); }catch(e){}
+      done();
+    }).catch(function(){
+      $("ok").disabled=false;
+      $("msg").textContent="Não deu para confirmar. Tente de novo em instantes ou responda no WhatsApp.";
+    });
+  };
+})();
+</script>
+</body>
+</html>

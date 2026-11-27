@@ -5,9 +5,9 @@
    Assim toda atualização publicada no GitHub chega na próxima vez que ela abrir com internet.
    Fontes do Google: cache primeiro (não mudam); sem cópia e com rede lenta, abre com a fonte
    do celular em vez de ficar esperando. */
-var CACHE = "boteco-dida-v5";
+var CACHE = "boteco-dida-v6";
 var PRAZO = 3000;
-var ASSETS = ["./", "./index.html", "./firebase-config.js", "./manifest.json",
+var ASSETS = ["./", "./index.html", "./firebase-config.js", "./confirmar.html", "./manifest.json",
   "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png",
   "./icon-maskable-192.png", "./icon-maskable-512.png"];
 

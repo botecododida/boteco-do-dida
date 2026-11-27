@@ -413,7 +413,7 @@ var KEY = "botecoDida.v2";
 var brl = new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"});
 
 function emptyDb(){
-  return { people:[], entries:[], functions:[], settings:{lastBackup:null} };
+  return { people:[], entries:[], discounts:[], sends:[], confirms:[], functions:[], settings:{lastBackup:null} };
 }
 /* texto que esta janela leu ou gravou por último: se o salvo mudar sem ser por ela,
    foi outra janela do app (aba do navegador + app instalado usam os mesmos dados) */
@@ -490,6 +490,9 @@ function counts(e){ return e.date<=today(); }
 function normalizeDb(r){
   r.entries=r.entries.filter(function(e){ return e.status!=="falta"; });
   r.entries.forEach(function(e){ e.status="escalado"; });
+  if(!Array.isArray(r.discounts)) r.discounts=[];
+  if(!Array.isArray(r.sends)) r.sends=[];
+  if(!Array.isArray(r.confirms)) r.confirms=[];
   return r;
 }
 function addDays(s,n){ var d=fromIso(s); d.setDate(d.getDate()+n); return iso(d); }
@@ -584,6 +587,7 @@ var ICONS = {
   pag:'<rect x="3" y="6" width="18" height="13" rx="2.5"/><path d="M3 10h18"/><path d="M16 15h2"/>',
   resumo:'<path d="M4 20l1.3-4A8 8 0 1 1 8 18.7L4 20Z"/><path d="M9 9.5c0 3 2.5 5.5 5.5 5.5l1-1.5-2-1-1 .8a4 4 0 0 1-2-2l.8-1-1-2L9 9.5Z"/>',
   pessoas:'<circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5"/><circle cx="17" cy="9" r="2.4"/><path d="M15.8 14.2c2.3.2 3.9 1.8 4.4 4.3"/>',
+  desc:'<circle cx="12" cy="12" r="9"/><path d="M8 9h8M12 5.8v6.4M8 16h8"/>',
   prev:'<path d="M15 5l-7 7 7 7"/>',
   next:'<path d="M9 5l7 7-7 7"/>',
   plus:'<path d="M12 5v14M5 12h14"/>',
@@ -681,7 +685,7 @@ function resetToToday(){
   var t=today(), d=fromIso(t);
   ui.day=t; ui.selDay=t; ui.sumAnchor=null;
   ui.calYear=d.getFullYear(); ui.calMonth=d.getMonth(); ui.calOpen=false;
-  ui.payAnchor=null;
+  ui.payAnchor=null; ui.descAnchor=null;
 }
 try { var st=localStorage.getItem(KEY+".tab"); if(st) ui.tab=st; } catch(e){}
 try { var sm=localStorage.getItem(KEY+".sumMode"); if(sm==="semana"||sm==="quinzena") ui.sumMode=sm; } catch(e){}
@@ -702,6 +706,7 @@ function commit(msg){
 var TABS=[
   ["escala","Escala","cal"],
   ["pagar","A pagar","pag"],
+  ["desc","Extras","desc"],
   ["resumo","Resumo","resumo"],
   ["pessoas","Pessoas","pessoas"]
 ];
@@ -735,7 +740,7 @@ function renderNav(){
 }
 function goTab(tab){
   /* cada visita a "A pagar" e ao Resumo recomeça na quinzena que precisa de atenção */
-  if(ui.tab!==tab){ ui.payAnchor=null; ui.sumAnchor=null; }
+  if(ui.tab!==tab){ ui.payAnchor=null; ui.sumAnchor=null; ui.descAnchor=null; }
   ui.tab=tab; try{localStorage.setItem(KEY+".tab",tab);}catch(e){}
   render();
 }
@@ -758,15 +763,24 @@ function helpSections(){
       "Toque em **Escalar** e marque quem vai trabalhar no dia. Para outro dia, toque na data lá em cima e escolha no calendário.",
       "Quem está escalado já conta como quem trabalhou. Não precisa marcar nada depois.",
       "Escalou a pessoa errada, ou ela não veio? Toque em **Tirar** na linha dela e confirme. Se o dia já foi pago (aparece **Pago**), desfaça o pagamento em **A pagar** antes.",
+      "O link da mensagem permite à pessoa dar o **OK**. A resposta aparece em **Enviar escala da semana** e ao lado do nome no dia.",
+      "Errou a função ou o valor? Toque em **Editar** na linha da pessoa. Errou o dia ou a pessoa? Toque em **Tirar**.",
+      "Em **Enviar escala da semana**, toque em **Flyer para o grupo** para gerar a imagem, ou em **Enviar** ao lado de cada nome para mandar a escala no WhatsApp dele.",
       "Depois da meia-noite, até as 6h, o app continua no dia do turno da noite."
     ]],
     ["pagar","A pagar",[
       "Mostra quanto cada pessoa tem a receber na quinzena: do dia 1 ao 15 e do dia 16 ao fim do mês. As setas trocam de quinzena. Dia que ainda não chegou não entra.",
       "**Copiar Pix** copia a chave da pessoa para você colar no app do banco.",
       "Depois de pagar no banco, toque em **Paguei**, confira os dias e toque em **Confirmar**. Pagou só uma parte? Desmarque os dias que ficaram faltando.",
+      "O botão **Fechamento da quinzena** reúne cada pessoa: marcar como pago, enviar o valor no WhatsApp e gerar o holerite.",
       "Em **Já pagos**, o botão **Holerite** gera o recibo em PDF para a pessoa assinar.",
       "Registrou um pagamento por engano? Em **Já pagos**, toque em **Desfazer** e confirme.",
       "O número na aba **A pagar** mostra quantas pessoas têm quinzena já fechada sem pagar."
+    ]],
+    ["desc","Extras",[
+      "Toque em **Novo** para lançar um **desconto** (vale, consumo) ou uma **bonificação**: escolha o tipo, a pessoa, a data, o motivo e o valor.",
+      "O valor entra no **A pagar** e no holerite de quem tem diária a receber. Se não for acertado, passa para a próxima quinzena.",
+      "Para corrigir, toque em **Editar**; para apagar, em **Excluir**. O que já foi acertado só muda se desfizer o pagamento."
     ]],
     ["resumo","Resumo",[
       "Manda para cada pessoa, pelo WhatsApp, os dias que ela trabalhou e o total. Abre na mesma quinzena de **A pagar** (a que tem gente para receber).",
@@ -777,6 +791,7 @@ function helpSections(){
     ["pessoas","Pessoas",[
       "Toque em **Nova pessoa** e preencha nome, WhatsApp com DDD, valor da diária e chave Pix.",
       "Para mudar a diária, toque em **Editar** na pessoa. O app pergunta se o valor novo vale também para os dias que ainda não foram pagos.",
+      "Para excluir um funcionário, toque em **Editar** → **Excluir funcionário**. Só dá para excluir quem ainda não teve pagamento registrado.",
       "Alguém parou de trabalhar? Toque em **Desativar**. A pessoa sai da lista de escalar, mas o histórico e o que ela tem a receber continuam."
     ]],
     ["nuvem","Vários celulares",[
@@ -906,7 +921,9 @@ function renderDayPanel(main){
 
   /* a data já aparece no botão do calendário, aqui vai só a ação */
   var hdr=h("div",{style:"display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;"},
-    h("button",{class:"btn primary sm",type:"button",onclick:openAddToDay},icon("plus"),h("span",{text:"Escalar"}))
+    h("button",{class:"btn primary sm",type:"button",onclick:openAddToDay},icon("plus"),h("span",{text:"Escalar"})),
+    h("button",{class:"btn sm",type:"button",onclick:function(){ openWeekShare(weekRange(ui.selDay).start); }},
+      icon("wa"),h("span",{text:"Enviar escala da semana"}))
   );
   panel.appendChild(hdr);
 
@@ -925,7 +942,8 @@ function renderDayPanel(main){
         h("span",{class:"avatar",text:initials(pName)}),
         h("div",{class:"person-info"},
           h("b",{text:pName}),
-          pRole?h("span",{text:pRole+" · "+money(entry.value)}):h("span",{text:money(entry.value)})
+          h("span",{text:((entry.role||pRole)?(entry.role||pRole)+" · ":"")+money(entry.value)}),
+          confirmedDay(entry)?h("span",{class:"pill ok",text:"✓ Deu OK"}):null
         ),
         renderRowAction(entry)
       );
@@ -952,12 +970,36 @@ function renderRowAction(entry){
     }},icon("check"),h("span",{text:"Pago"})));
     return div;
   }
+  div.appendChild(h("button",{class:"btn sm",type:"button",onclick:function(){ openEntryForm(entry); }},
+    icon("edit"),h("span",{text:"Editar"})));
   div.appendChild(confirmBtn("Tirar","Tirar?","sm danger",function(){
     /* procura pelo id e confere de novo: os dados podem ter mudado com a janela aberta */
     db.entries=db.entries.filter(function(e){ return !(e.id===entry.id&&!e.paid); });
     commit(firstName(nameOf(entry))+" saiu da escala.");
   }));
   return div;
+}
+
+/* corrige o valor ou a função só daquele dia */
+function openEntryForm(entry){
+  var iRole=h("select"), cur=entry.role||"";
+  var roles=[""].concat(db.functions); if(cur&&roles.indexOf(cur)<0) roles.push(cur);
+  roles.forEach(function(r){ iRole.appendChild(h("option",{value:r,text:r||"Sem função"})); });
+  iRole.value=cur;
+  var iValue=h("input",{type:"text",inputmode:"decimal",value:moneyInput(entry.value)});
+  openSheet(firstName(nameOf(entry))+" em "+ddmm(entry.date),h("div",{class:"form"},
+    h("div",{class:"field"},h("label",{text:"Função neste dia"}),iRole),
+    h("div",{class:"field"},h("label",{text:"Valor deste dia (R$)"}),iValue),
+    h("p",{class:"note",text:"Escalou no dia errado? Use o botão \"Tirar\" e escale no dia certo."}),
+    h("button",{class:"btn primary block",type:"button",text:"Salvar correção",onclick:function(){
+      var v=parseMoney(iValue.value);
+      if(!(v>0)){ toast("Preencha o valor."); return; }
+      syncDb();
+      var e=db.entries.filter(function(x){return x.id===entry.id&&!x.paid;})[0];
+      if(!e){ closeSheet(); render(); toast("Esse dia mudou. Confira."); return; }
+      e.role=iRole.value; e.value=v;
+      closeSheet(); commit("Corrigido.");
+    }})));
 }
 
 /* escalar: marca quem vai trabalhar no dia. Quem já está escalado aparece marcado e travado;
@@ -1007,6 +1049,171 @@ function openAddToDay(){
   }}));
 
   openSheet("Escalar para "+ddmm(day),body);
+}
+
+/* ================== ENVIAR ESCALA DA SEMANA ================== */
+var flyerLogo=new Image(); flyerLogo.src="icon-512.png";
+function weekEntries(start){
+  var end=addDays(start,6);
+  return db.entries.filter(function(e){ return e.date>=start&&e.date<=end&&person(e.personId); });
+}
+function personWeekMsg(p,entries,start,link){
+  var lines=["Oi "+firstName(p.name)+"! Sua escala da semana ("+ddmm(start)+" a "+ddmm(addDays(start,6))+"):",""];
+  entries.slice().sort(function(a,b){return a.date<b.date?-1:1;}).forEach(function(e){
+    lines.push("- "+cap(WDL[fromIso(e.date).getDay()])+", "+ddmm(e.date)+(e.role?" ("+e.role+")":""));
+  });
+  if(link) lines.push("","Toque no link e confirme que recebeu:",link);
+  lines.push("","———",BAR.nome);
+  return lines.join("\n");
+}
+/* "assinatura" da escala enviada: se mudar dia ou função, o OK antigo não vale mais */
+function weekSig(entries){
+  return entries.map(function(e){return e.date+":"+(e.role||"");}).sort().join("|");
+}
+function lastSend(pid,start){
+  return db.sends.filter(function(x){return x.personId===pid&&x.start===start;})
+    .sort(function(a,b){return String(a.createdAt).localeCompare(String(b.createdAt));}).pop()||null;
+}
+function confirmOf(token){ return db.confirms.filter(function(c){return c.id===token;})[0]||null; }
+function confirmedDay(entry){
+  var start=weekRange(entry.date).start, x=lastSend(entry.personId,start);
+  if(!x||!confirmOf(x.id)) return false;
+  return x.sig.split("|").indexOf(entry.date+":"+(entry.role||""))>-1;
+}
+function newToken(){
+  var a=new Uint8Array(16); crypto.getRandomValues(a);
+  return Array.prototype.map.call(a,function(b){return ("0"+b.toString(16)).slice(-2);}).join("");
+}
+/* o link leva a escala dentro dele: o funcionário não precisa de senha nem vê outros dados */
+function confirmLink(p,entries,start,token){
+  var data={t:token,n:firstName(p.name),s:start,d:entries.map(function(e){return [e.date,e.role||""];}).sort()};
+  var b=btoa(unescape(encodeURIComponent(JSON.stringify(data)))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+  return new URL("confirmar.html",location.href.split("#")[0]).href+"#"+b;
+}
+function shareStatus(pid,start){
+  var x=lastSend(pid,start);
+  if(!x) return {text:"Ainda não enviado",cls:""};
+  if(x.sig!==weekSig(weekEntries(start).filter(function(e){return e.personId===pid;})))
+    return {text:"Escala mudou: envie de novo",cls:"pill warn"};
+  var c=confirmOf(x.id);
+  if(c){
+    var d=new Date(c.at);
+    return {text:"✓ Deu OK"+(isNaN(d)?"":" em "+ddmm(iso(d))+" "+pad(d.getHours())+":"+pad(d.getMinutes())),cls:"pill ok"};
+  }
+  return {text:"Enviado, aguardando OK",cls:"pill warn"};
+}
+/* atualiza a situação na janela aberta quando chega um OK pela nuvem */
+function refreshShare(){
+  var els=document.querySelectorAll("[data-share]");
+  Array.prototype.forEach.call(els,function(el){
+    var k=el.getAttribute("data-share").split("|"), st=shareStatus(k[0],k[1]);
+    el.textContent=st.text; el.className=st.cls;
+  });
+}
+/* imagem da escala para o grupo (sem valores) */
+function drawFlyer(start){
+  var all=weekEntries(start), W=1080, X=70, MAX=W-X*2-60;
+  var c=document.createElement("canvas"), g=c.getContext("2d");
+  var FD='"Bricolage Grotesque", sans-serif', FB='Figtree, sans-serif';
+  g.font="500 40px "+FB;
+  var days=[];
+  for(var i=0;i<7;i++){
+    var d=addDays(start,i);
+    var names=all.filter(function(e){return e.date===d;}).map(function(e){
+      return nameOf(e)+(e.role?" ("+e.role+")":"");
+    }).sort(function(a,b){return a.localeCompare(b,"pt-BR");});
+    if(!names.length) continue;
+    var lines=[];
+    names.forEach(function(n){
+      var line="";
+      n.split(" ").forEach(function(w){
+        if(line&&g.measureText(line+" "+w).width>MAX){ lines.push(line); line=w; } else line=line?line+" "+w:w;
+      });
+      lines.push(line);
+    });
+    days.push({title:cap(WDL[fromIso(d).getDay()])+" · "+ddmm(d),lines:lines,h:110+lines.length*56});
+  }
+  var H=Math.max(1350,470+days.reduce(function(s,d){return s+d.h+28;},0)+130);
+  c.width=W; c.height=H;
+  g.fillStyle="#1f3b33"; g.fillRect(0,0,W,H);
+  g.textAlign="center";
+  if(flyerLogo.complete&&flyerLogo.naturalWidth){
+    g.save(); g.beginPath(); g.arc(W/2,150,100,0,Math.PI*2); g.clip();
+    g.drawImage(flyerLogo,W/2-100,50,200,200); g.restore();
+  }
+  g.fillStyle="#e3a72a"; g.font="800 72px "+FD; g.fillText("ESCALA DA SEMANA",W/2,345);
+  g.fillStyle="#eef1ea"; g.font="600 40px "+FB; g.fillText(ddmm(start)+" a "+ddmm(addDays(start,6)),W/2,405);
+  var y=460; g.textAlign="left";
+  days.forEach(function(d){
+    g.fillStyle="#ffffff"; g.beginPath();
+    if(g.roundRect) g.roundRect(X,y,W-X*2,d.h,28); else g.rect(X,y,W-X*2,d.h);
+    g.fill();
+    g.fillStyle="#1f3b33"; g.font="800 44px "+FD; g.fillText(d.title,X+30,y+66);
+    g.fillStyle="#18221e"; g.font="500 40px "+FB;
+    d.lines.forEach(function(l,i){ g.fillText(l,X+30,y+132+i*56); });
+    y+=d.h+28;
+  });
+  g.textAlign="center"; g.fillStyle="#a9bcb3"; g.font="600 34px "+FB;
+  g.fillText(BAR.nome+"  ·  "+BAR.instagram,W/2,H-55);
+  return c;
+}
+function shareFlyer(start){
+  /* tudo sem espera: o iPhone só abre o compartilhar direto no toque */
+  var bin=atob(drawFlyer(start).toDataURL("image/png").split(",")[1]);
+  var bytes=new Uint8Array(bin.length);
+  for(var i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+  var file=new File([bytes],"escala-"+start+".png",{type:"image/png"});
+  function download(){
+    var url=URL.createObjectURL(file);
+    var a=h("a",{href:url,download:file.name});
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){URL.revokeObjectURL(url);},60000);
+    toast("Flyer baixado.");
+  }
+  var can=false;
+  try{ can=!!(navigator.canShare&&navigator.canShare({files:[file]})); }catch(e){}
+  if(!can){ download(); return; }
+  navigator.share({files:[file]}).catch(function(err){ if(!err||err.name!=="AbortError") download(); });
+}
+function openWeekShare(start){
+  var list=weekEntries(start), body=h("div",{class:"form"});
+  body.appendChild(h("div",{class:"cal-nav"},
+    h("button",{type:"button","aria-label":"Semana anterior",onclick:function(){ openWeekShare(addDays(start,-7)); }},icon("prev")),
+    h("span",{class:"label",text:ddmm(start)+" a "+ddmm(addDays(start,6))}),
+    h("button",{type:"button","aria-label":"Próxima semana",onclick:function(){ openWeekShare(addDays(start,7)); }},icon("next"))));
+  if(!list.length){
+    body.appendChild(h("div",{class:"empty"},h("b",{text:"Ninguém escalado nesta semana"})));
+  } else {
+    body.appendChild(h("button",{class:"btn primary block",type:"button",onclick:function(){ shareFlyer(start); }},
+      icon("up"),h("span",{text:"Flyer para o grupo"})));
+    body.appendChild(h("p",{class:"section-title",text:"Escala individual"}));
+    var online=!!linkedUid();
+    body.appendChild(h("p",{class:"note",text:online?"A mensagem leva um link para a pessoa dar o OK. Ele aparece aqui com este celular na internet."
+      :"Para receber o OK dos funcionários, conecte este celular em Pessoas."}));
+    var by=groupByPerson(list);
+    sortedIds(by).forEach(function(pid){
+      var p=person(pid), es=by[pid].entries, n=es.length, action;
+      if(waNumber(p.phone)){
+        var sig=weekSig(es), prev=lastSend(pid,start);
+        var token=prev&&prev.sig===sig?prev.id:(online?newToken():"");
+        var link=online?confirmLink(p,es,start,token):"";
+        action=h("a",{class:"btn wa sm",target:"_blank",rel:"noopener",
+          href:"https://wa.me/"+waNumber(p.phone)+"?text="+encodeURIComponent(personWeekMsg(p,es,start,link)),
+          onclick:function(){
+            action.classList.add("sent"); action.lastChild.textContent="Enviar de novo";
+            if(!online||db.sends.some(function(x){return x.id===token;})) return;
+            db.sends.push({id:token,personId:pid,start:start,sig:sig,createdAt:new Date().toISOString()});
+            if(persist()) refreshShare();
+          }},
+          icon("wa"),h("span",{text:"Enviar"}));
+      } else action=h("span",{class:"pill warn",text:"Sem WhatsApp"});
+      var st=shareStatus(pid,start);
+      body.appendChild(h("div",{class:"person-row"},
+        h("div",{class:"person-info"},h("b",{text:p.name}),h("span",{text:n+" dia"+(n>1?"s":"")}),
+          online?h("span",{"data-share":pid+"|"+start,class:st.cls,text:st.text}):null),action));
+    });
+  }
+  openSheet("Escala da semana",body);
 }
 
 /* ================== A PAGAR ================== */
@@ -1072,7 +1279,7 @@ function renderPagar(){
   if(before.length>0){
     var oldestQ=quinzena(before.reduce(function(m,e){return e.date<m?e.date:m;},before[0].date));
     main.appendChild(h("div",{class:"notice"},
-      h("span",{text:"Tem "+money(sumVal(before))+" sem pagar de quinzena anterior."}),
+      h("span",{text:"Tem "+money(netOpen(before,prevQuinzena(q)))+" sem pagar de quinzena anterior."}),
       h("button",{class:"btn sm",type:"button",text:"Ver",onclick:function(){
         ui.payAnchor=oldestQ.start; render();
       }})
@@ -1094,13 +1301,18 @@ function renderPagar(){
   main.appendChild(h("div",{class:"totals"},
     h("div",{class:"total-card hl"},
       h("div",{class:"lbl",text:"Falta pagar"}),
-      h("div",{class:"val",text:money(sumVal(qPending))})
+      h("div",{class:"val",text:money(netOpen(qPending,q))})
     ),
     flashIf(h("div",{class:"total-card"},
       h("div",{class:"lbl",text:"Já pago"}),
-      h("div",{class:"val",text:money(sumVal(qPaid))})
+      h("div",{class:"val",text:money(sumVal(qPaid)-offVal(db.discounts.filter(function(x){
+        return x.paid&&x.appliedQ===q.start;
+      })))})
     ),"total-paid")
   ));
+
+  main.appendChild(h("button",{class:"btn primary block",type:"button",style:"margin-bottom:12px;",
+    onclick:function(){ openClosing(q.start); }},icon("check"),h("span",{text:"Fechamento da quinzena"})));
 
   /* pendentes */
   if(qPending.length===0){
@@ -1115,13 +1327,19 @@ function renderPagar(){
       var info=byP[pid], p=person(pid);
       var pName=p?p.name:"Removido", pPix=p?p.pix:"";
       var n=info.entries.length;
+      var disc=openDiscounts(pid,q), off=offVal(disc), due=Math.max(0,info.total-off);
       var row=h("div",{class:"pay-row"},
         h("span",{class:"avatar",text:initials(pName)}),
         h("div",{class:"pay-info"},
           h("b",{text:pName}),
-          h("span",{text:n+" dia"+(n>1?"s":"")+" · "+info.entries.map(function(e){return ddmm(e.date);}).join(", ")})
+          h("span",{text:n+" dia"+(n>1?"s":"")+" · "+info.entries.map(function(e){return ddmm(e.date);}).join(", ")}),
+          disc.length?h("span",{style:"display:block;",text:"Diárias "+money(info.total)+
+            [[true," · bônus +"],[false," · descontos -"]].map(function(t){
+              var v=sumVal(disc.filter(function(x){return isBonus(x)===t[0];}));
+              return v?t[1]+money(v):"";
+            }).join("")}):null
         ),
-        h("span",{class:"pay-val",text:money(info.total)})
+        h("span",{class:"pay-val",text:money(due)})
       );
       var actions=h("div",{class:"pay-actions"});
       if(pPix){
@@ -1130,8 +1348,8 @@ function renderPagar(){
         }},icon("copy"),h("span",{text:"Copiar Pix"})));
       }
       actions.appendChild(h("button",{class:"btn ok sm",type:"button",onclick:function(){
-        openPaySheet(pName,info.entries);
-      }},icon("check"),h("span",{text:"Paguei "+money(info.total)})));
+        openPaySheet(pName,info.entries,disc,q);
+      }},icon("check"),h("span",{text:"Paguei "+money(due)})));
       row.appendChild(actions);
       list.appendChild(row);
     });
@@ -1155,11 +1373,14 @@ function renderPagar(){
           h("b",{text:pName}),
           h("span",{text:n+" dia"+(n>1?"s":"")+when})
         ),
-        h("span",{class:"pay-val",text:money(info.total)})
+        h("span",{class:"pay-val",text:money(info.total-offVal(qDiscounts(pid,q,info.entries).filter(function(x){return x.paid;})))})
       ),"paid:"+pid);
       var actions=h("div",{class:"pay-actions"});
       actions.appendChild(confirmBtn("Desfazer","Confirmar?","sm danger",function(){
         info.entries.forEach(function(e){e.paid=false;e.paidAt=null;});
+        db.discounts.forEach(function(x){
+          if(x.personId===pid&&x.paid&&x.appliedQ===q.start){ x.paid=false; x.paidAt=null; x.appliedQ=null; }
+        });
         commit("Pagamento de "+firstName(pName)+" desfeito.");
       }));
       actions.appendChild(h("button",{class:"btn sm",type:"button",onclick:function(){
@@ -1173,44 +1394,234 @@ function renderPagar(){
   }
 }
 
+/* ================== FECHAMENTO ================== */
+function markPaid(entries,discounts,q){
+  var ids={}, dids={}, now=new Date().toISOString();
+  entries.forEach(function(e){ ids[e.id]=true; });
+  discounts.forEach(function(x){ dids[x.id]=true; });
+  db.entries.forEach(function(e){ if(ids[e.id]&&!e.paid){ e.paid=true; e.paidAt=now; } });
+  db.discounts.forEach(function(x){ if(dids[x.id]&&!x.paid){ x.paid=true; x.paidAt=now; x.appliedQ=q.start; } });
+}
+function closingData(pid,q){
+  var all=db.entries.filter(function(e){return e.personId===pid&&counts(e)&&inQ(e,q);});
+  var pend=all.filter(function(e){return !e.paid;});
+  var disc=qDiscounts(pid,q,all);
+  var total=Math.round((sumVal(all)-offVal(disc))*100)/100;
+  var due=Math.round((sumVal(pend)-offVal(disc.filter(function(x){return !x.paid;})))*100)/100;
+  return {all:all,pend:pend,disc:disc,total:total,due:due};
+}
+function payMsg(p,d,q){
+  var lines=["Oi "+firstName(p.name)+"! Seu pagamento de "+ddmm(q.start)+" a "+ddmm(q.end)+":",""];
+  d.all.slice().sort(function(a,b){return a.date<b.date?-1:1;}).forEach(function(e){
+    lines.push("- "+ddmm(e.date)+" diária: "+money(e.value));
+  });
+  d.disc.forEach(function(x){ lines.push("- "+ddmm(x.date)+" "+x.reason+": "+signed(x)); });
+  lines.push("","*Total da quinzena: "+money(d.total)+"*");
+  if(!d.pend.length) lines.push("Situação: pago.");
+  else {
+    if(d.due!==d.total) lines.push("Já pago: "+money(d.total-d.due));
+    lines.push("*A receber: "+money(d.due)+"*");
+  }
+  lines.push("","———",BAR.nome);
+  return lines.join("\n");
+}
+function openClosing(start){
+  var q=quinzena(start);
+  var worked=db.entries.filter(function(e){return counts(e)&&inQ(e,q);});
+  var by=groupByPerson(worked), ids=sortedIds(by), body=h("div",{class:"form"});
+  var data={}, due=0, payable=[];
+  ids.forEach(function(pid){
+    var d=data[pid]=closingData(pid,q);
+    if(d.pend.length){ due+=Math.max(0,d.due); if(d.due>=0) payable.push(pid); }
+  });
+  body.appendChild(h("p",{class:"note",text:q.label+" · falta pagar "+money(due)}));
+  if(q.end>today()) body.appendChild(h("div",{class:"notice"},h("span",{text:"A quinzena ainda não terminou: os valores são parciais."})));
+  body.appendChild(h("p",{class:"note",text:"1) Pague e toque em Paguei. 2) Envie o valor no WhatsApp. 3) Toque em Holerite e escolha a conversa da pessoa."}));
+  function pay(list){
+    syncDb();
+    list.forEach(function(pid){
+      var d=closingData(pid,q);
+      if(d.pend.length&&d.due>=0) markPaid(d.pend,openDiscounts(pid,q),q);
+    });
+    closeSheet(); commit("Pagamento registrado!"); openClosing(start);
+  }
+  ids.forEach(function(pid){
+    var d=data[pid], p=person(pid)||{name:"Removido"};
+    var actions=h("div",{class:"pay-actions"});
+    if(d.pend.length){
+      if(p.pix) actions.appendChild(h("button",{class:"btn sm",type:"button",onclick:function(){ copyText(p.pix,"Pix copiado!"); }},icon("copy"),h("span",{text:"Copiar Pix"})));
+      if(d.due>=0) actions.appendChild(confirmBtn("Paguei","Confirmar "+money(d.due)+"?","ok sm",function(){ pay([pid]); }));
+    }
+    if(waNumber(p.phone)) actions.appendChild(h("a",{class:"btn wa sm",target:"_blank",rel:"noopener",
+      href:"https://wa.me/"+waNumber(p.phone)+"?text="+encodeURIComponent(payMsg(p,d,q))},icon("wa"),h("span",{text:"Enviar valor"})));
+    else actions.appendChild(h("span",{class:"pill warn",text:"Sem WhatsApp"}));
+    actions.appendChild(h("button",{class:"btn sm",type:"button",onclick:function(){ emitPayslips([pid],by,q); }},icon("down"),h("span",{text:"Holerite"})));
+    body.appendChild(h("div",{class:"pay-row"+(d.pend.length?"":" paid")},
+      h("span",{class:"avatar",text:initials(p.name)}),
+      h("div",{class:"pay-info"},h("b",{text:p.name}),
+        h("span",{text:!d.pend.length?"Pago":d.due<0?"Desconto maior que o valor: corrija em Extras":"A receber"})),
+      h("span",{class:"pay-val",text:money(d.pend.length?d.due:d.total)}),
+      actions));
+  });
+  if(payable.length>1) body.appendChild(confirmBtn("Marcar todos como pagos","Já pagou todos? Confirmar","ok block",function(){ pay(payable); }));
+  if(ids.length) body.appendChild(h("button",{class:"btn block",type:"button",onclick:function(){ emitPayslips(ids,by,q); }},
+    icon("down"),h("span",{text:"Holerites de todos (PDF)"})));
+  else body.appendChild(h("div",{class:"empty"},h("b",{text:"Ninguém para pagar nesta quinzena"})));
+  openSheet("Fechamento",body);
+}
+
 /* "Paguei": confirma os dias antes de marcar como pago.
    Um toque a mais, mas um toque repetido não marca a pessoa de baixo,
    e dá para registrar só parte quando ela não consegue pagar tudo. */
-function openPaySheet(pName,entries){
+function openPaySheet(pName,entries,discounts,q){
   var body=h("div",{class:"form"});
-  body.appendChild(h("p",{class:"note",text:"Desmarque o dia que ainda não pagou."}));
+  body.appendChild(h("p",{class:"note",text:"Desmarque o dia que ainda não pagou"+
+    (discounts.length?" ou o desconto/bônus que vai ficar para depois.":".")}));
   var checks=[];
   var list=h("div",{class:"pick-list"});
-  entries.forEach(function(e){
+  function item(x,isDisc){
     var cb=h("input",{type:"checkbox",checked:true,onchange:update});
-    checks.push({id:e.id,value:+e.value||0,cb:cb});
+    checks.push({id:x.id,value:+x.value||0,cb:cb,disc:isDisc,bonus:isDisc&&isBonus(x)});
     list.appendChild(h("label",{class:"pick"},cb,
-      h("span",{style:"flex:1;font-weight:600;",text:WD[fromIso(e.date).getDay()]+", "+ddmm(e.date)}),
-      h("span",{class:"pay-val",text:money(e.value)})
+      h("span",{style:"flex:1;font-weight:600;",text:isDisc?x.reason+", "+ddmm(x.date)
+        :WD[fromIso(x.date).getDay()]+", "+ddmm(x.date)}),
+      h("span",{class:"pay-val",text:isDisc?signed(x):money(x.value)})
     ));
-  });
+  }
+  entries.forEach(function(e){ item(e,false); });
+  discounts.forEach(function(x){ item(x,true); });
   body.appendChild(list);
   var btn=h("button",{class:"btn primary block",type:"button",onclick:function(){
-    var ids={}, n=0;
-    checks.forEach(function(c){ if(c.cb.checked){ ids[c.id]=true; n++; } });
+    var ids={}, dids={}, n=0;
+    checks.forEach(function(c){ if(c.cb.checked){ if(c.disc) dids[c.id]=true; else { ids[c.id]=true; n++; } } });
     if(!n) return;
     var now=new Date().toISOString();
     /* procura pelo id: os dados podem ter sido recarregados com a janela aberta */
     db.entries.forEach(function(e){
       if(ids[e.id]&&!e.paid){ e.paid=true; e.paidAt=now; }
     });
+    db.discounts.forEach(function(x){
+      if(dids[x.id]&&!x.paid){ x.paid=true; x.paidAt=now; x.appliedQ=q.start; }
+    });
     flashLater("paid:"+entries[0].personId); flashLater("total-paid");
     closeSheet(); commit("Pagamento de "+firstName(pName)+" registrado!");
   }});
   function update(){
     var total=0, n=0;
-    checks.forEach(function(c){ if(c.cb.checked){ total+=c.value; n++; } });
-    btn.disabled=!n;
-    btn.textContent=n?"Confirmar "+money(total):"Nenhum dia marcado";
+    checks.forEach(function(c){ if(c.cb.checked){ total+=c.disc&&!c.bonus?-c.value:c.value; if(!c.disc) n++; } });
+    total=Math.round(total*100)/100;
+    btn.disabled=!n||total<0;
+    btn.textContent=!n?"Nenhum dia marcado":total<0?"Desconto maior que as diárias":"Confirmar "+money(total);
   }
   update();
   body.appendChild(btn);
   openSheet("Pagamento de "+firstName(pName),body);
+}
+
+/* ================== DESCONTOS ================== */
+/* cada lançamento é um desconto ou, com kind "bonus", uma bonificação */
+function isBonus(x){ return x.kind==="bonus"; }
+function signed(x){ return (isBonus(x)?"+":"-")+money(x.value); }
+/* quanto sai do total: descontos menos bonificações (negativo = a pessoa recebe a mais) */
+function offVal(list){ return list.reduce(function(s,x){ return s+(isBonus(x)?-1:1)*(+x.value||0); },0); }
+/* descontos que entram no acerto de uma pessoa numa quinzena: os já abatidos nela e, se ainda
+   há diária a pagar, os pendentes até o fim dela (o que sobrou de antes também entra) */
+function qDiscounts(pid,q,entries){
+  var open=entries.some(function(e){return !e.paid;});
+  return db.discounts.filter(function(x){
+    return x.personId===pid&&(x.paid?x.appliedQ===q.start:open&&x.date<=q.end);
+  }).sort(function(a,b){return a.date<b.date?-1:1;});
+}
+function openDiscounts(pid,q){
+  return db.discounts.filter(function(x){return x.personId===pid&&!x.paid&&x.date<=q.end;})
+    .sort(function(a,b){return a.date<b.date?-1:1;});
+}
+/* o que falta pagar de uma lista de diárias pendentes, já com os descontos (nunca negativo) */
+function netOpen(entries,q){
+  var by=groupByPerson(entries);
+  return Object.keys(by).reduce(function(s,pid){
+    return s+Math.max(0,by[pid].total-offVal(openDiscounts(pid,q)));
+  },0);
+}
+function renderDescontos(){
+  var main=$("#main"); main.textContent="";
+  addChild(main,header("Descontos e bônus",
+    h("button",{class:"btn primary",type:"button",onclick:function(){ openDiscountForm(null); }},icon("plus"),h("span",{text:"Novo"}))));
+  if(!ui.descAnchor) ui.descAnchor=today();
+  var q=quinzena(ui.descAnchor);
+  main.appendChild(h("div",{class:"cal-nav q-nav"},
+    h("button",{type:"button","aria-label":"Quinzena anterior",onclick:function(){ ui.descAnchor=prevQuinzena(q).start; render(); }},icon("prev")),
+    h("div",{class:"label"},h("div",{text:q.label}),h("small",{text:q.range})),
+    h("button",{type:"button","aria-label":"Próxima quinzena",onclick:function(){ ui.descAnchor=nextQuinzena(q).start; render(); }},icon("next"))
+  ));
+  var list=db.discounts.filter(function(x){return inQ(x,q);}).sort(function(a,b){return a.date<b.date?-1:1;});
+  var older=db.discounts.filter(function(x){return !x.paid&&x.date<q.start;});
+  if(older.length){
+    main.appendChild(h("div",{class:"notice"},
+      h("span",{text:older.length+(older.length>1?" lançamentos anteriores ainda não acertados.":" lançamento anterior ainda não acertado.")}),
+      h("button",{class:"btn sm",type:"button",text:"Ver",onclick:function(){ ui.descAnchor=older.reduce(function(m,x){return x.date<m?x.date:m;},older[0].date); render(); }})));
+  }
+  if(!list.length){
+    main.appendChild(h("div",{class:"empty"},h("b",{text:"Nenhum lançamento nesta quinzena"}),
+      h("span",{text:"Toque em \"Novo\" para lançar um desconto ou uma bonificação."})));
+    return;
+  }
+  function card(label,items){ return h("div",{class:"total-card"},
+    h("div",{class:"lbl",text:label}),h("div",{class:"val",text:money(sumVal(items))})); }
+  main.appendChild(h("div",{class:"totals"},
+    card("Bonificações",list.filter(isBonus)),
+    card("Descontos",list.filter(function(x){return !isBonus(x);}))));
+  list.forEach(function(x){
+    var name=nameOf(x);
+    var row=h("div",{class:"person-row"},
+      h("span",{class:"avatar",text:initials(name)}),
+      h("div",{class:"person-info"},h("b",{text:name}),
+        h("span",{text:ddmm(x.date)+" · "+x.reason+" · "+signed(x)})),
+      x.paid?h("span",{class:"pill ok",text:"Acertado"})
+        :h("div",{class:"presence"},
+          h("button",{class:"btn sm",type:"button",onclick:function(){ openDiscountForm(x); }},icon("edit"),h("span",{text:"Editar"})),
+          confirmBtn("Excluir","Excluir?","sm danger",function(){
+            db.discounts=db.discounts.filter(function(y){ return !(y.id===x.id&&!y.paid); });
+            commit("Lançamento excluído.");
+          })));
+    main.appendChild(row);
+  });
+}
+function openDiscountForm(old){
+  var people=db.people.slice().sort(function(a,b){return a.name.localeCompare(b.name,"pt-BR");});
+  if(!people.length){ toast("Cadastre pessoas primeiro na aba Pessoas."); return; }
+  var iWho=h("select");
+  iWho.appendChild(h("option",{value:"",text:"Escolha a pessoa"}));
+  people.forEach(function(p){ iWho.appendChild(h("option",{value:p.id,text:p.name+(p.active===false?" (inativo)":"")})); });
+  var iKind=h("select");
+  iKind.appendChild(h("option",{value:"desconto",text:"Desconto (diminui o valor)"}));
+  iKind.appendChild(h("option",{value:"bonus",text:"Bonificação (aumenta o valor)"}));
+  var iDate=h("input",{type:"date",value:old?old.date:today()});
+  var iReason=h("input",{type:"text",maxlength:"40",placeholder:"Ex: Vale, consumo, bônus"});
+  var iValue=h("input",{type:"text",inputmode:"decimal",placeholder:"Ex: 20,00",
+    onblur:function(){ var n=parseMoney(iValue.value); if(n) iValue.value=moneyInput(n); }});
+  function field(l,el){ return h("div",{class:"field"},h("label",{text:l}),el); }
+  if(old){ iKind.value=isBonus(old)?"bonus":"desconto"; iWho.value=old.personId; iReason.value=old.reason; iValue.value=moneyInput(old.value); }
+  openSheet(old?"Corrigir lançamento":"Novo lançamento",h("div",{class:"form"},
+    field("Tipo",iKind),field("Pessoa",iWho),field("Data",iDate),field("Motivo",iReason),field("Valor (R$)",iValue),
+    h("button",{class:"btn primary block",type:"button",text:"Salvar",onclick:function(){
+      var value=parseMoney(iValue.value), reason=iReason.value.trim();
+      if(!iWho.value){ toast("Escolha a pessoa."); return; }
+      if(!iDate.value){ toast("Preencha a data."); return; }
+      if(!reason){ toast("Preencha o motivo."); return; }
+      if(!(value>0)){ toast("Preencha o valor."); return; }
+      if(old){
+        syncDb();
+        var x=db.discounts.filter(function(y){return y.id===old.id&&!y.paid;})[0];
+        if(!x){ closeSheet(); render(); toast("Esse lançamento mudou. Confira."); return; }
+        x.kind=iKind.value; x.personId=iWho.value; x.date=iDate.value; x.reason=reason; x.value=value;
+        ui.descAnchor=iDate.value; closeSheet(); commit("Corrigido."); return;
+      }
+      db.discounts.push({id:uid(),kind:iKind.value,personId:iWho.value,date:iDate.value,reason:reason,value:value,
+        paid:false,paidAt:null,appliedQ:null,createdAt:new Date().toISOString()});
+      ui.descAnchor=iDate.value;
+      closeSheet(); commit(iKind.value==="bonus"?"Bonificação salva.":"Desconto salvo.");
+    }})));
 }
 
 /* ================== RESUMO ================== */
@@ -1247,6 +1658,10 @@ function saveSent(r,ids){
 function markSent(r,pid){
   var ids=sentIds(r);
   if(ids.indexOf(pid)<0){ ids.push(pid); saveSent(r,ids); }
+}
+function periodDiscounts(pid,r,entries){
+  if(ui.sumMode==="quinzena") return qDiscounts(pid,quinzena(r.start),entries);
+  return db.discounts.filter(function(x){return x.personId===pid&&x.date>=r.start&&x.date<=r.end;});
 }
 function waLink(p,info,r){
   return "https://wa.me/"+waNumber(p.phone)+"?text="+encodeURIComponent(buildSummaryMsg(p,info,r));
@@ -1352,17 +1767,19 @@ function renderResumo(){
     var p=person(pid);
     var pName=p?p.name:"Removido";
     var days=info.entries;
+    var disc=periodDiscounts(pid,r,days), net=info.total-offVal(disc);
 
     var card=h("div",{class:"sum-card"},
       h("div",{class:"top"},
         h("span",{class:"avatar",text:initials(pName)}),
         h("div",{class:"person-info",style:"flex:1;"},
           h("b",{text:pName}),
-          h("span",{text:days.length+" dia"+(days.length>1?"s":"")+" · "+money(info.total)})
+          h("span",{text:days.length+" dia"+(days.length>1?"s":"")+" · "+money(net)})
         )
       ),
       h("div",{class:"detail"},
-        days.map(function(e){ return h("div",{text:ddmm(e.date)+" — "+money(e.value)}); })
+        days.map(function(e){ return h("div",{text:ddmm(e.date)+" — "+money(e.value)}); }),
+        disc.map(function(x){ return h("div",{text:ddmm(x.date)+" — "+x.reason+": "+signed(x)}); })
       )
     );
 
@@ -1401,8 +1818,14 @@ function buildSummaryMsg(p,info,r){
   info.entries.slice().sort(function(a,b){return a.date<b.date?-1:1;}).forEach(function(e){
     lines.push("- "+ddmm(e.date)+" — "+money(e.value));
   });
+  var disc=periodDiscounts(p.id,r,info.entries);
+  if(disc.length){
+    lines.push("");
+    lines.push("Descontos e bônus:");
+    disc.forEach(function(x){ lines.push("- "+ddmm(x.date)+" "+x.reason+": "+signed(x)); });
+  }
   lines.push("");
-  lines.push("*Total: "+money(info.total)+"*");
+  lines.push("*Total: "+money(info.total-offVal(disc))+"*");
   lines.push("");
   lines.push("———");
   lines.push(BAR.nome);
@@ -1427,7 +1850,7 @@ function writeQueue(q){ localStorage.setItem(QUEUE_KEY,JSON.stringify(q)); }
    assim dois celulares mexendo em coisas diferentes não apagam o trabalho um do outro */
 function diffDb(a,b){
   var ops=[];
-  ["people","entries"].forEach(function(c){
+  ["people","entries","discounts","sends"].forEach(function(c){
     var old={};
     (a[c]||[]).forEach(function(x){ old[x.id]=x; });
     (b[c]||[]).forEach(function(x){
@@ -1486,7 +1909,7 @@ function cloudFlush(){
 /* dados da nuvem + o que ainda está na fila deste celular */
 function cloudData(){
   var out={};
-  ["people","entries"].forEach(function(c){
+  ["people","entries","discounts","sends","confirms"].forEach(function(c){
     var m={};
     cloud.snap[c].forEach(function(x){ m[x.id]=Object.assign({},x.data,{id:x.id}); });
     out[c]=m;
@@ -1507,20 +1930,22 @@ function cloudData(){
   }
   var entries=list(out.entries);
   entries.forEach(function(e){ e.paid=!!e.paid; e.paidAt=e.paidAt||null; });
-  return normalizeDb({people:list(out.people),entries:entries,functions:out.functions.slice()});
+  var discounts=list(out.discounts);
+  discounts.forEach(function(x){ x.paid=!!x.paid; x.paidAt=x.paidAt||null; x.appliedQ=x.appliedQ||null; });
+  return normalizeDb({people:list(out.people),entries:entries,discounts:discounts,sends:list(out.sends),confirms:list(out.confirms),functions:out.functions.slice()});
 }
-function snapshotsReady(){ return !!(cloud.snap.people&&cloud.snap.entries&&cloud.snap.config); }
+function snapshotsReady(){ return !!(cloud.snap.people&&cloud.snap.entries&&cloud.snap.discounts&&cloud.snap.sends&&cloud.snap.confirms&&cloud.snap.config); }
 function cloudApply(){
   if(!snapshotsReady()||!cloud.user) return;
   if(!linkedUid()){ cloudLink(); return; }
   if(linkedUid()!==cloud.user.uid||dbLocked) return;
   syncDb();
   var data=cloudData();
-  var next={people:data.people,entries:data.entries,functions:data.functions,settings:db.settings};
+  var next={people:data.people,entries:data.entries,discounts:data.discounts,sends:data.sends,confirms:data.confirms,functions:data.functions,settings:db.settings};
   var s=JSON.stringify(next);
   if(s!==JSON.stringify(db)){
     try{ localStorage.setItem(KEY,s); savedJson=s; }catch(e){ toast("Sem espaço para salvar. Libere espaço no aparelho."); return; }
-    db=next; render();
+    db=next; render(); refreshShare();
   }
   cloudFlush();
 }
@@ -1548,7 +1973,7 @@ function cloudLink(){
 function stopListening(){ cloud.stops.forEach(function(f){ f(); }); cloud.stops=[]; cloud.snap={}; }
 function startListening(){
   stopListening();
-  ["people","entries","config"].forEach(function(c){
+  ["people","entries","discounts","sends","confirms","config"].forEach(function(c){
     cloud.stops.push(cloud.fs.onSnapshot(cloud.fs.collection(cloud.store,c),{includeMetadataChanges:true},function(q){
       /* só vale o que veio do servidor: uma cópia vazia sem internet não apaga nada */
       if(q.metadata.fromCache) return;
@@ -1676,62 +2101,116 @@ function wrapText(s,max){
   if(line) out.push(line);
   return out;
 }
+/* logo pronta para o PDF (JPEG sobre o fundo do cabeçalho) */
+function logoJpeg(){
+  if(!(flyerLogo.complete&&flyerLogo.naturalWidth)) return null;
+  var c=document.createElement("canvas"); c.width=c.height=300;
+  var g=c.getContext("2d");
+  g.fillStyle="#1f3b33"; g.fillRect(0,0,300,300);
+  g.beginPath(); g.arc(150,150,148,0,Math.PI*2); g.clip();
+  g.drawImage(flyerLogo,0,0,300,300);
+  return atob(c.toDataURL("image/jpeg",0.92).split(",")[1]);
+}
 function payslipPage(pid,entries,q){
   var p=person(pid)||{name:"Removido"}, o=[];
-  function text(x,y,s,size,bold){ o.push("BT /F"+(bold?2:1)+" "+size+" Tf "+x+" "+y+" Td ("+pdfEsc(s)+") Tj ET"); }
-  function right(y,s,size,bold){ text((545-textWidth(s,size)*(bold?1.04:1)).toFixed(1),y,s,size,bold); }
-  function line(y){ o.push("0.6 w 50 "+y+" m 545 "+y+" l S"); }
-  var total=sumVal(entries);
-  var paid=entries.filter(function(e){return e.paid;}), paidSum=sumVal(paid);
-  text(50,790,BAR.nome,18,true);
-  text(50,773,"CNPJ "+BAR.cnpj,10);
-  line(760);
-  text(50,738,"HOLERITE QUINZENAL - RECIBO DE PAGAMENTO",13,true);
-  text(50,718,"Período: "+ddmmaaaa(q.start)+" a "+ddmmaaaa(q.end)+" ("+q.label+")",10);
-  text(50,696,"Nome: "+p.name,11,true);
-  text(50,680,"Função: "+(p.role||"Não informada"),10);
-  line(666);
-  text(50,650,"Data",10,true); text(160,650,"Descrição",10,true); right(650,"Valor",10,true);
-  line(642);
-  var y=626;
-  entries.slice().sort(function(a,b){return a.date<b.date?-1:1;}).forEach(function(e){
-    text(50,y,ddmmaaaa(e.date),10);
-    text(160,y,"Diária - "+WDL[fromIso(e.date).getDay()]+(e.role?" ("+e.role+")":""),10);
-    right(y,money(e.value),10);
-    y-=17;
-  });
-  line(y+6); y-=14;
-  text(50,y,"Total ("+entries.length+(entries.length===1?" diária)":" diárias)"),12,true);
-  right(y,money(total),12,true); y-=20;
+  var GREEN="0.122 0.231 0.200", GOLD="0.890 0.655 0.165", INK="0.094 0.133 0.118", GRAY="0.38 0.43 0.41",
+      SOFT="0.945 0.953 0.937", WHITE="1 1 1", OK="0.11 0.48 0.27", RED="0.68 0.18 0.13", PALE="1 0.965 0.875";
+  function box(x,y,w,ht,c){ o.push(c+" rg "+x+" "+y+" "+w+" "+ht+" re f"); }
+  function text(x,y,s,size,bold,c){ o.push((c||INK)+" rg BT /F"+(bold?2:1)+" "+size+" Tf "+x+" "+y+" Td ("+pdfEsc(s)+") Tj ET"); }
+  function right(y,s,size,bold,c,edge){ text(((edge||535)-textWidth(s,size)*(bold?1.04:1)).toFixed(1),y,s,size,bold,c); }
+  function line(x1,x2,y){ o.push(GRAY+" RG 0.6 w "+x1+" "+y+" m "+x2+" "+y+" l S"); }
+  var gross=sumVal(entries), disc=qDiscounts(pid,q,entries), off=offVal(disc), total=Math.round((gross-off)*100)/100;
+  var plus=sumVal(disc.filter(isBonus)), minus=sumVal(disc.filter(function(x){return !isBonus(x);}));
+  var paid=entries.filter(function(e){return e.paid;});
+  var paidSum=sumVal(paid)-offVal(disc.filter(function(x){return x.paid;}));
   var allPaid=paid.length===entries.length;
+  /* muitos lançamentos: linhas mais juntas para caber em uma folha */
+  var lh=Math.max(9,Math.min(20,Math.floor(250/(entries.length+disc.length))));
+
+  /* cabeçalho */
+  box(0,732,595,110,GREEN); box(0,727,595,5,GOLD);
+  var tx=48;
+  if(logoJpeg()){ o.push("q 82 0 0 82 40 746 cm /Logo Do Q"); tx=138; }
+  text(tx,797,BAR.nome,22,true,WHITE);
+  text(tx,779,"CNPJ "+BAR.cnpj,10,false,WHITE);
+  text(tx,764,"Instagram "+BAR.instagram,10,false,WHITE);
+  right(797,"HOLERITE",18,true,GOLD,535);
+  right(779,"Recibo de pagamento",10,false,WHITE,555);
+
+  /* dados da pessoa */
+  box(40,652,515,60,SOFT); box(40,652,5,60,GOLD);
+  text(56,694,"COLABORADOR",8,true,GRAY); text(56,678,p.name,13,true);
+  text(56,662,"Função: "+(p.role||"Não informada"),10);
+  text(350,694,"PERÍODO",8,true,GRAY); text(350,678,ddmmaaaa(q.start)+" a "+ddmmaaaa(q.end),11,true);
+  text(350,662,cap(q.label),10);
+
+  /* tabela */
+  box(40,622,515,20,GREEN);
+  text(52,628,"DATA",9,true,WHITE); text(140,628,"DESCRIÇÃO",9,true,WHITE); right(628,"VALOR",9,true,WHITE);
+  var y=622-lh, i=0;
+  function row(date,label,value,color){
+    if(i++%2) box(40,y,515,lh,SOFT);
+    var ty=y+(lh-7)/2;
+    text(52,ty,ddmmaaaa(date),10); text(140,ty,label,10); right(ty,value,10,false,color);
+    y-=lh;
+  }
+  entries.slice().sort(function(a,b){return a.date<b.date?-1:1;}).forEach(function(e){
+    row(e.date,"Diária - "+WDL[fromIso(e.date).getDay()]+(e.role?" ("+e.role+")":""),money(e.value));
+  });
+  disc.forEach(function(x){
+    row(x.date,(isBonus(x)?"Bonificação - ":"Desconto - ")+x.reason,(isBonus(x)?"+ ":"- ")+money(x.value),isBonus(x)?OK:RED);
+  });
+  y+=lh; box(40,y-2,515,1.5,GOLD); y-=20;
+
+  /* totais */
+  function sum(label,value,color){ text(330,y,label,10,false,GRAY); right(y,value,10,true,color); y-=16; }
+  if(disc.length){
+    sum("Diárias ("+entries.length+")",money(gross));
+    if(plus) sum("Bonificações","+ "+money(plus),OK);
+    if(minus) sum("Descontos","- "+money(minus),RED);
+  }
+  y-=18; box(320,y-6,235,28,GREEN);
+  text(332,y+3,disc.length?"LÍQUIDO":"TOTAL ("+entries.length+(entries.length===1?" diária)":" diárias)"),11,true,WHITE);
+  right(y+2,money(total),15,true,GOLD,545);
+  y-=28;
+  if(total<0){ text(48,y,"Descontos maiores que as diárias. Confira os lançamentos.",11,true,RED); return o.join("\n"); }
   if(!allPaid){
-    text(50,y,"Já pago",10); right(y,money(paidSum),10); y-=16;
-    text(50,y,"Falta pagar",10,true); right(y,money(total-paidSum),10,true); y-=20;
+    sum("Já pago",money(paidSum)); sum("Falta pagar",money(total-paidSum),RED);
   } else {
     var last=paid.reduce(function(m,e){return e.paidAt&&e.paidAt>m?e.paidAt:m;},"");
-    if(last){ text(50,y,"Pago em "+ddmmaaaa(iso(new Date(last))),10); y-=20; }
+    if(last) right(y,"PAGO em "+ddmmaaaa(iso(new Date(last))),10,true,OK,555);
+    y-=16;
   }
-  if(q.end>today()){ text(50,y,"Atenção: quinzena ainda em andamento (valores parciais).",10,true); y-=20; }
-  y-=10;
+  if(q.end>today()){ text(48,y,"Atenção: quinzena ainda em andamento (valores parciais).",10,true,RED); y-=18; }
+  y-=8;
   /* só vira recibo (com assinatura) quando tudo está pago */
   if(!allPaid){
-    text(50,y,"Pagamento pendente. Este documento não vale como recibo.",11,true);
-    return o.join("\n");
+    box(40,y-14,515,30,PALE);
+    text(52,y-3,"Pagamento pendente. Este documento não vale como recibo.",11,true);
+  } else {
+    wrapText("Declaro que recebi de "+BAR.nome+" a quantia de "+money(total)+" ("+extenso(total)+
+      "), referente "+(disc.length?"às diárias e aos lançamentos listados acima.":"às diárias listadas acima."),90)
+      .forEach(function(l){ text(48,y,l,10.5); y-=15; });
+    y-=22; text(48,y,"Data: ____/____/________",10); y-=40;
+    line(48,278,y); line(318,548,y);
+    text(48,y-13,p.name,9,true); text(48,y-25,"Assinatura de quem recebeu",8,false,GRAY);
+    text(318,y-13,BAR.nome,9,true); text(318,y-25,"Assinatura de quem pagou",8,false,GRAY);
   }
-  wrapText("Declaro que recebi de "+BAR.nome+" a quantia de "+money(total)+" ("+extenso(total)+
-    "), referente às diárias listadas acima.",88).forEach(function(l){ text(50,y,l,11); y-=16; });
-  y-=34;
-  text(50,y,"Data: ____/____/________",11); y-=50;
-  line(y); text(50,y-14,p.name,10); text(50,y-28,"Assinatura de quem recebeu",9);
+  box(0,0,595,22,GREEN); text(48,8,BAR.nome+"  |  CNPJ "+BAR.cnpj,8,false,WHITE);
   return o.join("\n");
 }
 function buildPdf(pages){
   var objs=["<< /Type /Catalog /Pages 2 0 R >>",null,
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>"], kids=[];
+  var jpg=logoJpeg(), xobj="";
+  if(jpg){
+    objs.push("<< /Type /XObject /Subtype /Image /Width 300 /Height 300 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length "+jpg.length+" >>\nstream\n"+jpg+"\nendstream");
+    xobj=" /XObject << /Logo "+objs.length+" 0 R >>";
+  }
   pages.forEach(function(c){
     var n=objs.length+1; kids.push(n+" 0 R");
-    objs.push("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents "+(n+1)+" 0 R >>");
+    objs.push("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >>"+xobj+" >> /Contents "+(n+1)+" 0 R >>");
     objs.push("<< /Length "+c.length+" >>\nstream\n"+c+"\nendstream");
   });
   objs[1]="<< /Type /Pages /Kids ["+kids.join(" ")+"] /Count "+kids.length+" >>";
@@ -1846,6 +2325,8 @@ function renderPessoas(){
           (linkedUid()?" Vale para TODOS os celulares conectados.":"")+" Continuar?")) return;
         db.people=data.people;
         db.entries=data.entries;
+        db.discounts=data.discounts;
+        db.sends=data.sends;
         db.functions=Array.isArray(data.functions)?data.functions:[];
         db.settings=Object.assign(emptyDb().settings,data.settings||{});
         try{ localStorage.setItem(KEY+".danificado-visto","1"); }catch(e){}
@@ -1955,16 +2436,26 @@ function openPersonForm(existing){
     }
   }}));
 
-  /* excluir apagaria junto os dias da pessoa (inclusive o que ela tem a receber):
-     só aparece para quem nunca foi escalado, ex.: cadastro feito por engano */
+  /* excluir leva junto a escala e os lançamentos ainda não pagos; quem já recebeu algum
+     pagamento fica no histórico (só dá para desativar) */
   if(!isNew){
-    if(db.entries.some(function(e){return e.personId===existing.id;})){
-      body.appendChild(h("p",{class:"note",text:"Quem já foi escalado não pode ser excluído."+
-        (existing.active===false?"":" Para tirar da escala, use \"Desativar\" na lista.")}));
+    var mine=function(x){ return x.personId===existing.id; };
+    if(db.entries.concat(db.discounts).some(function(x){ return mine(x)&&x.paid; })){
+      body.appendChild(h("p",{class:"note",text:"Quem já teve pagamento registrado não pode ser excluído."+
+        (existing.active===false?"":" Para não escalar mais, use \"Desativar\" na lista.")}));
     } else {
-      body.appendChild(confirmBtn("Excluir pessoa","Confirmar exclusão?","danger block",function(){
+      var nDays=db.entries.filter(mine).length, nExtra=db.discounts.filter(mine).length;
+      if(nDays||nExtra) body.appendChild(h("p",{class:"note",text:"Excluir apaga também "+
+        nDays+" dia(s) de escala e "+nExtra+" desconto(s)/bônus desta pessoa."}));
+      body.appendChild(confirmBtn("Excluir funcionário","Confirmar exclusão?","danger block",function(){
+        syncDb();
+        if(db.entries.concat(db.discounts).some(function(x){ return mine(x)&&x.paid; })){
+          closeSheet(); render(); toast("Há um pagamento registrado. Não foi excluído."); return;
+        }
+        var not=function(x){ return !mine(x); };
         db.people=db.people.filter(function(p){return p.id!==existing.id;});
-        closeSheet(); commit(firstName(existing.name)+" removido.");
+        db.entries=db.entries.filter(not); db.discounts=db.discounts.filter(not);
+        closeSheet(); commit(firstName(existing.name)+" excluído.");
       }));
     }
   }
@@ -2055,6 +2546,7 @@ function render(){
   renderNav();
   if(ui.tab==="escala") renderEscala();
   else if(ui.tab==="pagar") renderPagar();
+  else if(ui.tab==="desc") renderDescontos();
   else if(ui.tab==="resumo") renderResumo();
   else if(ui.tab==="pessoas") renderPessoas();
   renderFooter();
